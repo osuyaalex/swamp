@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
-import 'package:untitled2/features/task_board/presentation/task_board_screen.dart';
+import 'package:untitled2/app/home_shell.dart';
 
 class Home extends StatelessWidget {
   const Home({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return const TaskBoardScreen();
+    return const HomeShell();
   }
 }

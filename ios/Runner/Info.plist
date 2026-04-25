@@ -4,6 +4,10 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>SWAMP needs camera access to capture identity documents for verification.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>SWAMP needs photo library access so you can attach existing identity documents.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
