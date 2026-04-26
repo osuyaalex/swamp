@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'package:untitled2/core/audit_signing.dart';
+import 'package:untitled2/core/biometrics.dart';
+import 'package:untitled2/core/device_identity.dart';
+import 'package:untitled2/core/secure_storage.dart';
 import 'package:untitled2/features/document_verification/data/document_api_client.dart';
 import 'package:untitled2/features/document_verification/data/document_polling_service.dart';
 import 'package:untitled2/features/document_verification/data/document_repository_impl.dart';
@@ -28,6 +32,11 @@ class _DocumentDashboardScreenState extends State<DocumentDashboardScreen> {
   @override
   void initState() {
     super.initState();
+    // --- Security primitives (per-device, persisted across launches) ----
+    final secureStorage = PlatformSecureStorage();
+    final deviceIdentity = DeviceIdentity(storage: secureStorage);
+    final auditSigner = AuditSigner(storage: secureStorage);
+    // --- Document feature stack ----------------------------------------
     final backend = MockDocumentBackend();
     final api = DocumentApiClient(backend);
     final ws = DocumentWebSocketClient(backend);
@@ -36,10 +45,13 @@ class _DocumentDashboardScreenState extends State<DocumentDashboardScreen> {
       api: api,
       ws: ws,
       polling: polling,
+      signer: auditSigner,
+      deviceIdentity: deviceIdentity,
     );
     _controller = DocumentDashboardController(
       repository: repo,
       source: PlatformDocumentSource(),
+      biometrics: PlatformBiometrics(),
     );
   }
 
@@ -99,6 +111,36 @@ class _DashboardScaffold extends StatelessWidget {
   }
 }
 
+/// Open the detail sheet for [doc]. Verified documents are gated behind
+/// a biometric prompt — once the prompt passes (or the device has no
+/// biometrics) the audit trail records the access and the sheet opens.
+/// On a denied prompt the sheet stays closed and the trail records the
+/// denial.
+Future<void> _openDetail(
+  BuildContext context,
+  DocumentDashboardController controller,
+  Document doc,
+) async {
+  if (doc.status != DocumentStatus.verified) {
+    DocumentDetailSheet.show(context, doc.id);
+    return;
+  }
+  final granted = await controller.authenticateForView(
+    documentId: doc.id,
+    reason: 'Authenticate to view your verified ${doc.type.label}.',
+  );
+  if (!context.mounted) return;
+  if (granted) {
+    DocumentDetailSheet.show(context, doc.id);
+  } else {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Access denied — biometric required for verified documents.'),
+      ),
+    );
+  }
+}
+
 class _DashboardBody extends StatelessWidget {
   const _DashboardBody();
 
@@ -123,7 +165,7 @@ class _DashboardBody extends StatelessWidget {
             child: DocumentCard(
               key: ValueKey(d.id),
               document: d,
-              onTap: () => DocumentDetailSheet.show(context, d.id),
+              onTap: () => _openDetail(context, controller, d),
               onRetry: () => controller.retry(d.id),
               onDelete: () => controller.delete(d.id),
             ),

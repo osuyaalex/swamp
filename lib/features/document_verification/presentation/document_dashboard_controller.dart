@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import 'package:untitled2/core/biometrics.dart';
 import 'package:untitled2/features/document_verification/data/document_source.dart';
 import 'package:untitled2/features/document_verification/domain/entities/document.dart';
 import 'package:untitled2/features/document_verification/domain/repositories/document_repository.dart';
@@ -10,13 +11,23 @@ class DocumentDashboardController extends ChangeNotifier {
   DocumentDashboardController({
     required DocumentRepository repository,
     required DocumentSource source,
+    required Biometrics biometrics,
   })  : _repo = repository,
-        _source = source {
+        _source = source,
+        _biometrics = biometrics {
     _bootstrap();
   }
 
   final DocumentRepository _repo;
   final DocumentSource _source;
+  final Biometrics _biometrics;
+
+  /// Repository handle exposed for screens that need to append audit
+  /// entries from outside the controller's own operations (e.g. the
+  /// detail sheet's biometric grant/deny events).
+  DocumentRepository get repository => _repo;
+
+  Biometrics get biometrics => _biometrics;
 
   bool _loading = true;
   bool get loading => _loading;
@@ -85,6 +96,38 @@ class DocumentDashboardController extends ChangeNotifier {
 
   Future<void> reconnect() async {
     await _repo.reconnect();
+  }
+
+  /// Gate sensitive document views behind a biometric prompt. Returns
+  /// true if the user passed the prompt (or no biometric is available
+  /// on the device — we fall back to allowing access rather than
+  /// soft-locking the user out of their own data).
+  ///
+  /// Either outcome is recorded on the document's audit trail so a
+  /// compliance auditor can see who accessed what, and from which
+  /// device, when.
+  Future<bool> authenticateForView({
+    required String documentId,
+    required String reason,
+  }) async {
+    final available = await _biometrics.isAvailable();
+    if (!available) {
+      await _repo.appendAudit(
+        documentId: documentId,
+        kind: AuditKind.accessGranted,
+        message: 'Access granted (no biometric available on device)',
+      );
+      return true;
+    }
+    final ok = await _biometrics.authenticate(reason: reason);
+    await _repo.appendAudit(
+      documentId: documentId,
+      kind: ok ? AuditKind.accessGranted : AuditKind.accessDenied,
+      message: ok
+          ? 'Access granted via biometric'
+          : 'Biometric prompt failed or cancelled',
+    );
+    return ok;
   }
 
   /// UI helper: counts of docs in each terminal state, used by the dashboard

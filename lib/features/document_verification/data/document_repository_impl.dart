@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:untitled2/core/audit_signing.dart';
+import 'package:untitled2/core/device_identity.dart';
 import 'package:untitled2/core/id.dart';
 import 'package:untitled2/features/document_verification/data/document_api_client.dart';
 import 'package:untitled2/features/document_verification/data/document_polling_service.dart';
@@ -27,11 +29,15 @@ class DocumentRepositoryImpl implements DocumentRepository {
     required DocumentWebSocketClient ws,
     required DocumentPollingService polling,
     SharedPreferences? prefs,
+    AuditSigner? signer,
+    DeviceIdentity? deviceIdentity,
     String prefsKey = 'document_verification.docs.v1',
   })  : _api = api,
         _ws = ws,
         _polling = polling,
         _prefs = prefs,
+        _signer = signer,
+        _deviceIdentity = deviceIdentity,
         _prefsKey = prefsKey {
     _wireSubscriptions();
     _ws.connect();
@@ -41,7 +47,87 @@ class DocumentRepositoryImpl implements DocumentRepository {
   final DocumentWebSocketClient _ws;
   final DocumentPollingService _polling;
   final SharedPreferences? _prefs;
+  final AuditSigner? _signer;
+  final DeviceIdentity? _deviceIdentity;
   final String _prefsKey;
+
+  /// Audit-trail enrichment cache. Populated lazily on first use so the
+  /// initial render isn't blocked on `package_info_plus`/keystore reads.
+  String? _cachedDeviceId;
+  String? _cachedAppVersion;
+
+  Future<({String deviceId, String appVersion})> _identity() async {
+    if (_deviceIdentity == null) {
+      return (deviceId: '', appVersion: '');
+    }
+    _cachedDeviceId ??= await _deviceIdentity.deviceId();
+    _cachedAppVersion ??= await _deviceIdentity.appVersion();
+    return (deviceId: _cachedDeviceId!, appVersion: _cachedAppVersion!);
+  }
+
+  /// Build an audit entry enriched with actor / device id / app version
+  /// and (if a signer is wired) HMAC + prevHash chain.
+  Future<AuditEntry> _buildAudit({
+    required List<AuditEntry> prevAudit,
+    required AuditKind kind,
+    required String message,
+    String actor = 'system',
+  }) async {
+    final id = await _identity();
+    final prevSig = prevAudit.isEmpty ? '' : prevAudit.last.signature;
+
+    var entry = AuditEntry(
+      id: IdGen.next('a'),
+      kind: kind,
+      message: message,
+      at: DateTime.now(),
+      actor: actor,
+      deviceId: id.deviceId,
+      appVersion: id.appVersion,
+      prevHash: _signer?.prevHashOf(prevSig) ?? '',
+    );
+
+    if (_signer != null) {
+      final signature = await _signer.sign(
+        payload: entry.canonicalPayload(),
+        prevSignature: prevSig,
+      );
+      entry = AuditEntry(
+        id: entry.id,
+        kind: entry.kind,
+        message: entry.message,
+        at: entry.at,
+        actor: entry.actor,
+        deviceId: entry.deviceId,
+        appVersion: entry.appVersion,
+        prevHash: entry.prevHash,
+        signature: signature,
+      );
+    }
+    return entry;
+  }
+
+  /// Public hook for the UI/controller to append an audit entry from
+  /// outside the repository — e.g. biometric grant/deny events on the
+  /// detail sheet. Idempotent against unknown ids.
+  @override
+  Future<void> appendAudit({
+    required String documentId,
+    required AuditKind kind,
+    required String message,
+    String actor = 'You',
+  }) async {
+    final current = _byId[documentId];
+    if (current == null) return;
+    final entry = await _buildAudit(
+      prevAudit: current.audit,
+      kind: kind,
+      message: message,
+      actor: actor,
+    );
+    _byId[documentId] = current.copyWith(audit: [...current.audit, entry]);
+    _emit();
+  }
 
   final Map<String, Document> _byId = {};
   final StreamController<List<Document>> _outDocs =
@@ -75,9 +161,15 @@ class DocumentRepositoryImpl implements DocumentRepository {
     required DocumentType type,
     required DocumentBytes bytes,
   }) async {
-    // 1. Optimistic insert
+    // 1. Optimistic insert with the first signed audit entry.
     final localId = IdGen.next('doc');
     final now = DateTime.now();
+    final firstEntry = await _buildAudit(
+      prevAudit: const [],
+      kind: AuditKind.uploaded,
+      message: '${type.label} queued for upload',
+      actor: 'You',
+    );
     Document doc = Document(
       id: localId,
       type: type,
@@ -88,14 +180,7 @@ class DocumentRepositoryImpl implements DocumentRepository {
       checksum: bytes.checksum,
       createdAt: now,
       bytes: bytes,
-      audit: [
-        AuditEntry(
-          id: IdGen.next('a'),
-          kind: AuditKind.uploaded,
-          message: '${type.label} queued for upload',
-          at: now,
-        ),
-      ],
+      audit: [firstEntry],
     );
     _byId[localId] = doc;
     _emit();
@@ -103,36 +188,30 @@ class DocumentRepositoryImpl implements DocumentRepository {
     // 2. Try the upload, roll back on failure.
     try {
       final resp = await _api.upload(type: type, bytes: bytes);
+      final entry = await _buildAudit(
+        prevAudit: doc.audit,
+        kind: AuditKind.statusChanged,
+        message: 'Uploaded to server (id ${resp.id.substring(0, 8)}…)',
+      );
       doc = doc.copyWith(
         serverId: resp.id,
         status: DocumentStatus.uploaded,
         uploadedAt: resp.uploadedAt,
-        audit: [
-          ...doc.audit,
-          AuditEntry(
-            id: IdGen.next('a'),
-            kind: AuditKind.statusChanged,
-            message: 'Uploaded to server (id ${resp.id.substring(0, 8)}…)',
-            at: DateTime.now(),
-          ),
-        ],
+        audit: [...doc.audit, entry],
       );
       _byId[localId] = doc;
       _track(resp.id);
       _emit();
       return doc;
     } catch (e) {
+      final entry = await _buildAudit(
+        prevAudit: doc.audit,
+        kind: AuditKind.statusChanged,
+        message: 'Upload failed: $e — tap retry',
+      );
       doc = doc.copyWith(
         status: DocumentStatus.queued,
-        audit: [
-          ...doc.audit,
-          AuditEntry(
-            id: IdGen.next('a'),
-            kind: AuditKind.statusChanged,
-            message: 'Upload failed: $e — tap retry',
-            at: DateTime.now(),
-          ),
-        ],
+        audit: [...doc.audit, entry],
       );
       _byId[localId] = doc;
       _emit();
@@ -154,57 +233,49 @@ class DocumentRepositoryImpl implements DocumentRepository {
     }
     if (current.serverId != null) _untrack(current.serverId!);
 
+    final retryEntry = await _buildAudit(
+      prevAudit: current.audit,
+      kind: AuditKind.retried,
+      message: 'Retry triggered',
+      actor: 'You',
+    );
     final retried = current.copyWith(
       status: DocumentStatus.uploading,
       progress: 0,
       stage: null,
       issues: const [],
       clearRejection: true,
-      audit: [
-        ...current.audit,
-        AuditEntry(
-          id: IdGen.next('a'),
-          kind: AuditKind.retried,
-          message: 'Retry triggered',
-          at: DateTime.now(),
-        ),
-      ],
+      audit: [...current.audit, retryEntry],
     );
     _byId[documentId] = retried;
     _emit();
 
     try {
       final resp = await _api.upload(type: current.type, bytes: current.bytes!);
+      final entry = await _buildAudit(
+        prevAudit: retried.audit,
+        kind: AuditKind.statusChanged,
+        message: 'Re-uploaded — awaiting verification',
+      );
       final next = retried.copyWith(
         serverId: resp.id,
         status: DocumentStatus.uploaded,
         uploadedAt: resp.uploadedAt,
-        audit: [
-          ...retried.audit,
-          AuditEntry(
-            id: IdGen.next('a'),
-            kind: AuditKind.statusChanged,
-            message: 'Re-uploaded — awaiting verification',
-            at: DateTime.now(),
-          ),
-        ],
+        audit: [...retried.audit, entry],
       );
       _byId[documentId] = next;
       _track(resp.id);
       _emit();
       return next;
     } catch (e) {
+      final entry = await _buildAudit(
+        prevAudit: retried.audit,
+        kind: AuditKind.statusChanged,
+        message: 'Retry failed: $e',
+      );
       final failed = retried.copyWith(
         status: DocumentStatus.queued,
-        audit: [
-          ...retried.audit,
-          AuditEntry(
-            id: IdGen.next('a'),
-            kind: AuditKind.statusChanged,
-            message: 'Retry failed: $e',
-            at: DateTime.now(),
-          ),
-        ],
+        audit: [...retried.audit, entry],
       );
       _byId[documentId] = failed;
       _emit();
@@ -297,7 +368,7 @@ class DocumentRepositoryImpl implements DocumentRepository {
   /// Single update path used by both WS and polling — keeps the logic for
   /// status transitions (and audit-trail entries) in one place so the two
   /// sources can never disagree on what "moving to VERIFIED" means.
-  void _applyStatusUpdate({
+  Future<void> _applyStatusUpdate({
     required String serverId,
     required String wireStatus,
     required double progress,
@@ -307,7 +378,7 @@ class DocumentRepositoryImpl implements DocumentRepository {
     DateTime? verifiedAt,
     String? rejectionReason,
     DateTime? expiresAt,
-  }) {
+  }) async {
     final localId = _byId.entries
         .firstWhere(
           (e) => e.value.serverId == serverId,
@@ -319,28 +390,27 @@ class DocumentRepositoryImpl implements DocumentRepository {
     final newStatus = DocumentStatusX.fromWire(wireStatus);
     final crossed = current.status != newStatus;
 
-    final audit = <AuditEntry>[
-      ...current.audit,
-      if (crossed)
-        AuditEntry(
-          id: IdGen.next('a'),
-          kind: switch (newStatus) {
-            DocumentStatus.verified => AuditKind.verified,
-            DocumentStatus.rejected => AuditKind.rejected,
-            _ => AuditKind.statusChanged,
-          },
-          message: switch (newStatus) {
-            DocumentStatus.verified =>
-              'Verified${confidence == null ? '' : ' (${(confidence * 100).round()}%)'}',
-            DocumentStatus.rejected =>
-              'Rejected${rejectionReason == null ? '' : ': $rejectionReason'}',
-            DocumentStatus.processing =>
-              'Processing started${stage == null ? '' : ' — $stage'}',
-            _ => newStatus.label,
-          },
-          at: DateTime.now(),
-        ),
-    ];
+    final audit = <AuditEntry>[...current.audit];
+    if (crossed) {
+      final entry = await _buildAudit(
+        prevAudit: current.audit,
+        kind: switch (newStatus) {
+          DocumentStatus.verified => AuditKind.verified,
+          DocumentStatus.rejected => AuditKind.rejected,
+          _ => AuditKind.statusChanged,
+        },
+        message: switch (newStatus) {
+          DocumentStatus.verified =>
+            'Verified${confidence == null ? '' : ' (${(confidence * 100).round()}%)'}',
+          DocumentStatus.rejected =>
+            'Rejected${rejectionReason == null ? '' : ': $rejectionReason'}',
+          DocumentStatus.processing =>
+            'Processing started${stage == null ? '' : ' — $stage'}',
+          _ => newStatus.label,
+        },
+      );
+      audit.add(entry);
+    }
 
     final next = current.copyWith(
       status: newStatus,

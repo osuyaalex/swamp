@@ -83,8 +83,30 @@ extension DocumentStatusX on DocumentStatus {
       };
 }
 
-enum AuditKind { uploaded, statusChanged, retried, verified, rejected, deleted }
+enum AuditKind {
+  uploaded,
+  statusChanged,
+  retried,
+  verified,
+  rejected,
+  deleted,
+  /// Biometric prompt passed before viewing a verified document.
+  accessGranted,
+  /// Biometric prompt failed or was cancelled — kept for compliance.
+  accessDenied,
+}
 
+/// Compliance-grade audit entry.
+///
+/// Beyond the message + timestamp the entry captures *who* (actor),
+/// *from where* (deviceId, appVersion), and includes a tamper-evident
+/// HMAC chain (`prevHash` + `signature`) so an auditor can detect any
+/// post-hoc edits to the log.
+///
+/// `signature` and `prevHash` are populated by `AuditSigner` at the
+/// moment the entry is appended; entries that pre-date the introduction
+/// of signing (or those constructed by tests with a null signer) leave
+/// the fields empty and validate accordingly.
 @immutable
 class AuditEntry {
   const AuditEntry({
@@ -92,6 +114,11 @@ class AuditEntry {
     required this.kind,
     required this.message,
     required this.at,
+    this.actor = 'system',
+    this.deviceId = '',
+    this.appVersion = '',
+    this.prevHash = '',
+    this.signature = '',
   });
 
   final String id;
@@ -99,11 +126,40 @@ class AuditEntry {
   final String message;
   final DateTime at;
 
-  Map<String, dynamic> toJson() => {
+  /// Who triggered the entry (today: 'You' for user actions, 'system'
+  /// for server-driven status updates). In a real backend this would be
+  /// the authenticated user id.
+  final String actor;
+
+  /// Device identifier this entry was written from.
+  final String deviceId;
+
+  /// App version that wrote the entry.
+  final String appVersion;
+
+  /// SHA-256 of the previous entry's signature, base64. Empty for the
+  /// first entry on a document.
+  final String prevHash;
+
+  /// HMAC-SHA-256 over the entry payload + prevSignature, base64.
+  final String signature;
+
+  /// Canonical payload used as the input to the signature. Defined here
+  /// so the signer and any verifier hash *exactly* the same bytes.
+  Map<String, Object?> canonicalPayload() => {
         'id': id,
         'kind': kind.name,
         'message': message,
         'at': at.toIso8601String(),
+        'actor': actor,
+        'deviceId': deviceId,
+        'appVersion': appVersion,
+        'prevHash': prevHash,
+      };
+
+  Map<String, dynamic> toJson() => {
+        ...canonicalPayload(),
+        'signature': signature,
       };
 
   factory AuditEntry.fromJson(Map<String, dynamic> json) => AuditEntry(
@@ -111,6 +167,11 @@ class AuditEntry {
         kind: AuditKind.values.byName(json['kind'] as String),
         message: json['message'] as String,
         at: DateTime.parse(json['at'] as String),
+        actor: (json['actor'] as String?) ?? 'system',
+        deviceId: (json['deviceId'] as String?) ?? '',
+        appVersion: (json['appVersion'] as String?) ?? '',
+        prevHash: (json['prevHash'] as String?) ?? '',
+        signature: (json['signature'] as String?) ?? '',
       );
 }
 

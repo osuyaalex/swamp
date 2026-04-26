@@ -330,6 +330,8 @@ class _AuditTimeline extends StatelessWidget {
         AuditKind.verified => Icons.verified_outlined,
         AuditKind.rejected => Icons.cancel_outlined,
         AuditKind.deleted => Icons.delete_outline,
+        AuditKind.accessGranted => Icons.lock_open_outlined,
+        AuditKind.accessDenied => Icons.lock_outline,
       };
 
   static String _relative(DateTime at) {

@@ -32,6 +32,16 @@ abstract class DocumentRepository {
   /// button on the offline banner.
   Future<void> reconnect();
 
+  /// Append a compliance-grade audit entry from outside the repository
+  /// (e.g. biometric grant/deny events on the document detail sheet).
+  /// Signed and chained the same way as repo-internal entries.
+  Future<void> appendAudit({
+    required String documentId,
+    required AuditKind kind,
+    required String message,
+    String actor = 'You',
+  });
+
   /// Release timers, websocket, etc. Called when the app shuts down.
   Future<void> dispose();
 }

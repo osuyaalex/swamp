@@ -1,9 +1,23 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import 'package:untitled2/core/connectivity_state.dart';
+import 'package:untitled2/core/screen_capture_guard.dart';
 import 'package:untitled2/features/document_verification/presentation/document_dashboard_screen.dart';
 import 'package:untitled2/features/task_board/presentation/task_board_screen.dart';
 
-/// App shell with two tabs.
+/// App shell with two tabs plus two app-wide concerns:
+///
+///  • A network connectivity banner that materialises whenever the
+///    device loses connectivity, so users never have to guess why an
+///    upload or task sync isn't progressing.
+///  • A platform-level screen-capture guard that activates while the
+///    user is on the Documents tab. On Android this turns on
+///    `FLAG_SECURE` (the OS refuses to capture the window into a
+///    screenshot or recording). On iOS, where Apple does not expose an
+///    API to block screenshots, the guard listens for screen-recording
+///    state and presents a blur as a soft barrier.
 ///
 /// Uses `IndexedStack` (not a `PageView` or rebuilt body) so both feature
 /// screens stay mounted when you switch tabs. That matters because:
@@ -20,6 +34,10 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
+  final _connectivity = ConnectivityWatcher();
+  late final StreamSubscription<ConnectivityState> _connSub;
+  ConnectivityState _connState = ConnectivityState.online;
+  bool _screenGuardActive = false;
 
   static const _tabs = [
     _TabInfo(
@@ -34,19 +52,68 @@ class _HomeShellState extends State<HomeShell> {
     ),
   ];
 
+  static const _docsTabIndex = 1;
+
+  @override
+  void initState() {
+    super.initState();
+    _connSub = _connectivity.stream.listen((next) {
+      if (mounted) setState(() => _connState = next);
+    });
+    // Documents tab is the default-after-tasks; if the user lands on
+    // index 0 (Tasks), the guard stays off until they switch.
+    _syncScreenGuardFor(_index);
+  }
+
+  @override
+  void dispose() {
+    _connSub.cancel();
+    _connectivity.dispose();
+    if (_screenGuardActive) {
+      ScreenCaptureGuard.instance.release();
+    }
+    super.dispose();
+  }
+
+  void _onTabChanged(int next) {
+    setState(() => _index = next);
+    _syncScreenGuardFor(next);
+  }
+
+  Future<void> _syncScreenGuardFor(int tabIndex) async {
+    final shouldProtect = tabIndex == _docsTabIndex;
+    if (shouldProtect && !_screenGuardActive) {
+      _screenGuardActive = true;
+      await ScreenCaptureGuard.instance.protect();
+    } else if (!shouldProtect && _screenGuardActive) {
+      _screenGuardActive = false;
+      await ScreenCaptureGuard.instance.release();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(
-        index: _index,
-        children: const [
-          TaskBoardScreen(),
-          DocumentDashboardScreen(),
-        ],
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            _OfflineBanner(state: _connState),
+            Expanded(
+              child: IndexedStack(
+                index: _index,
+                children: const [
+                  TaskBoardScreen(),
+                  DocumentDashboardScreen(),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
+        onDestinationSelected: _onTabChanged,
         destinations: [
           for (final t in _tabs)
             NavigationDestination(
@@ -56,6 +123,48 @@ class _HomeShellState extends State<HomeShell> {
             ),
         ],
       ),
+    );
+  }
+}
+
+class _OfflineBanner extends StatelessWidget {
+  const _OfflineBanner({required this.state});
+
+  final ConnectivityState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = theme.colorScheme.error;
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
+      alignment: Alignment.topCenter,
+      child: state == ConnectivityState.online
+          ? const SizedBox(width: double.infinity)
+          : Material(
+              color: color.withValues(alpha: 0.10),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 8),
+                child: Row(
+                  children: [
+                    Icon(Icons.cloud_off, size: 14, color: color),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'You are offline. Uploads and live updates will '
+                        'resume once you reconnect.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: color,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
     );
   }
 }
