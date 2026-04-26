@@ -149,6 +149,14 @@ class DragController extends ChangeNotifier {
     // After the frame settles, look up the new card rect and animate to it.
     await SchedulerBinding.instance.endOfFrame;
 
+    // If the user crossed columns, slide the destination column into the
+    // centre of the board view first — then we re-measure and the ghost
+    // animation lands on the column in its final position.
+    if (task.status != destStatus) {
+      await _centerColumn(destStatus);
+      await SchedulerBinding.instance.endOfFrame;
+    }
+
     final settled = _rectForTaskId(task.id) ?? Rect.fromLTWH(
       _ghostTopLeft.dx,
       _ghostTopLeft.dy,
@@ -159,6 +167,23 @@ class DragController extends ChangeNotifier {
     await _animateGhostTo(settled.topLeft);
     Haptics.dragDrop();
     _reset();
+  }
+
+  /// Animates the horizontal board scroll so [status]'s column is centred.
+  /// No-op on wide screens where every column is already visible (the
+  /// scroll view's maxScrollExtent is 0, so ensureVisible clamps to current
+  /// offset).
+  Future<void> _centerColumn(TaskStatus status) async {
+    final reg = _columns[status];
+    if (reg == null) return;
+    final ctx = reg.listAreaKey.currentContext;
+    if (ctx == null) return;
+    await Scrollable.ensureVisible(
+      ctx,
+      alignment: 0.5,
+      duration: const Duration(milliseconds: 360),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   Future<void> cancel() async {
