@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import 'package:untitled2/features/document_verification/domain/entities/document.dart';
 import 'package:untitled2/features/document_verification/presentation/document_dashboard_controller.dart';
+import 'package:untitled2/features/document_verification/presentation/widgets/document_preview.dart';
 import 'package:untitled2/features/document_verification/presentation/widgets/status_chip.dart';
 
 class DocumentDetailSheet extends StatelessWidget {
@@ -103,6 +105,10 @@ class DocumentDetailSheet extends StatelessWidget {
                       DocumentStatusChip(status: doc.status),
                     ],
                   ),
+                  if (doc.bytes != null || doc.thumbnailBytes != null) ...[
+                    const SizedBox(height: 18),
+                    _DocumentPreviewSection(doc: doc),
+                  ],
                   const SizedBox(height: 18),
                   if (!doc.status.isTerminal) ...[
                     LinearProgressIndicator(
@@ -396,4 +402,106 @@ class _Meta extends StatelessWidget {
     final l = at.toLocal();
     return '${l.year}-${two(l.month)}-${two(l.day)} ${two(l.hour)}:${two(l.minute)}';
   }
+}
+
+/// Renders the document preview using the custom render object, with
+/// "tap an OCR block to copy its text" interactivity. Picks full-size
+/// bytes when available, else falls back to the persisted thumbnail.
+class _DocumentPreviewSection extends StatefulWidget {
+  const _DocumentPreviewSection({required this.doc});
+  final Document doc;
+
+  @override
+  State<_DocumentPreviewSection> createState() =>
+      _DocumentPreviewSectionState();
+}
+
+class _DocumentPreviewSectionState extends State<_DocumentPreviewSection> {
+  String? _highlightedBlockText;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final bytes = widget.doc.bytes?.bytes ?? widget.doc.thumbnailBytes;
+    if (bytes == null) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Preview', style: theme.textTheme.labelLarge),
+        const SizedBox(height: 8),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            height: 260,
+            color: theme.colorScheme.surfaceContainerHighest,
+            child: DocumentPreview(
+              imageBytes: bytes,
+              ocrResult: widget.doc.ocrResult,
+              highlightedBlockText: _highlightedBlockText,
+              onBlockTap: (block) async {
+                final messenger = ScaffoldMessenger.of(context);
+                await Clipboard.setData(ClipboardData(text: block.text));
+                if (!mounted) return;
+                setState(() => _highlightedBlockText = block.text);
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Copied: ${block.text.length > 40 ? '${block.text.substring(0, 40)}…' : block.text}',
+                    ),
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        if (widget.doc.ocrResult != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Pinch to zoom • Tap a highlighted block to copy its text',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.outline,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+          if (widget.doc.ocrResult!.fields.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final entry in widget.doc.ocrResult!.fields.entries)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 9, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primaryContainer
+                          .withValues(alpha: 0.4),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '${_prettyField(entry.key)}: ${entry.value}',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onPrimaryContainer,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ],
+    );
+  }
+
+  static String _prettyField(String key) => switch (key) {
+        'surname' => 'Surname',
+        'givenNames' => 'Given names',
+        'dateOfBirth' => 'DOB',
+        'documentNumber' => 'Document #',
+        'expiry' => 'Expires',
+        _ => key,
+      };
 }

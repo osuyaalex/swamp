@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:untitled2/features/document_verification/data/document_source.dart';
 import 'package:untitled2/features/document_verification/domain/entities/document.dart';
 import 'package:untitled2/features/document_verification/presentation/document_dashboard_controller.dart';
+import 'package:untitled2/features/document_verification/presentation/sheets/document_camera_screen.dart';
 
 class UploadSheet extends StatefulWidget {
   const UploadSheet({super.key});
@@ -83,55 +84,71 @@ class _UploadSheetState extends State<UploadSheet> {
   }
 
   List<Widget> _sourceOptions(ThemeData theme) {
-    final options = [
-      (
-        DocumentSourceKind.camera,
-        Icons.photo_camera_outlined,
-        'Capture with camera',
-        'Best for ID cards and passports.'
-      ),
-      (
-        DocumentSourceKind.gallery,
-        Icons.photo_library_outlined,
-        'Choose from gallery',
-        'Pick an existing photo.'
-      ),
-      (
-        DocumentSourceKind.file,
-        Icons.attach_file,
-        'Pick a file',
-        'PDF, JPG, or PNG (up to 10 MB).'
-      ),
-    ];
     return [
       _SelectedTypeBadge(type: _picked!),
       const SizedBox(height: 12),
-      for (final (kind, icon, title, subtitle) in options)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: _OptionTile(
-            icon: icon,
-            title: title,
-            subtitle: subtitle,
-            onTap: () async {
-              final controller = context.read<DocumentDashboardController>();
-              await controller.pickAndUpload(type: _picked!, kind: kind);
-              if (!mounted) return;
-              Navigator.of(context).pop();
-              if (controller.lastError != null) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(controller.lastError!)),
-                );
-              }
-            },
-          ),
+      Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: _OptionTile(
+          icon: Icons.document_scanner_outlined,
+          title: 'Scan with custom camera',
+          subtitle:
+              'Real-time edge detection — best for IDs, passports, bills.',
+          onTap: () async {
+            Navigator.of(context).pop();
+            await DocumentCameraScreen.open(
+              context,
+              documentType: _picked!,
+            );
+          },
         ),
+      ),
+      Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: _OptionTile(
+          icon: Icons.photo_camera_outlined,
+          title: 'Quick photo',
+          subtitle: 'Use the system camera (no edge detection).',
+          onTap: () => _runPicker(DocumentSourceKind.camera),
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: _OptionTile(
+          icon: Icons.photo_library_outlined,
+          title: 'Choose from gallery',
+          subtitle: 'Pick an existing photo.',
+          onTap: () => _runPicker(DocumentSourceKind.gallery),
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: _OptionTile(
+          icon: Icons.attach_file,
+          title: 'Pick a file',
+          subtitle: 'PDF, JPG, or PNG (up to 10 MB).',
+          onTap: () => _runPicker(DocumentSourceKind.file),
+        ),
+      ),
       const SizedBox(height: 6),
       TextButton(
         onPressed: () => setState(() => _picked = null),
         child: const Text('Choose a different type'),
       ),
     ];
+  }
+
+  Future<void> _runPicker(DocumentSourceKind kind) async {
+    final controller = context.read<DocumentDashboardController>();
+    final messenger = ScaffoldMessenger.of(context);
+    await controller.pickAndUpload(type: _picked!, kind: kind);
+    if (!mounted) return;
+    Navigator.of(context).pop();
+    if (controller.lastError != null) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(controller.lastError!)),
+      );
+    }
   }
 
   static String _hintFor(DocumentType t) => switch (t) {

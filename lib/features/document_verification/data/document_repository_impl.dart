@@ -291,6 +291,22 @@ class DocumentRepositoryImpl implements DocumentRepository {
   }
 
   @override
+  Future<void> updateEnrichment({
+    required String documentId,
+    Uint8List? thumbnailBytes,
+    OcrResult? ocrResult,
+  }) async {
+    final current = _byId[documentId];
+    if (current == null) return;
+    final next = current.copyWith(
+      thumbnailBytes: thumbnailBytes,
+      ocrResult: ocrResult,
+    );
+    _byId[documentId] = next;
+    _emit();
+  }
+
+  @override
   Future<void> reconnect() async {
     _ws.reconnect();
   }

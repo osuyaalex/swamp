@@ -25,17 +25,21 @@ class ScreenCaptureGuard {
   int _activeCount = 0;
 
   Future<void> protect() async {
-    _activeCount++;
-    if (_activeCount > 1) return;
-    try {
-      if (Platform.isAndroid) {
-        await ScreenProtector.protectDataLeakageOn();
-      } else if (Platform.isIOS) {
-        await ScreenProtector.protectDataLeakageWithBlur();
-      }
-    } catch (e) {
-      if (kDebugMode) debugPrint('[screen_capture_guard] protect failed: $e');
-    }
+    // TEMPORARILY DISABLED for video recording. Restore the body below
+    // (and remove the early return) before shipping.
+    //
+    //   _activeCount++;
+    //   if (_activeCount > 1) return;
+    //   try {
+    //     if (Platform.isAndroid) {
+    //       await ScreenProtector.protectDataLeakageOn();
+    //     } else if (Platform.isIOS) {
+    //       await ScreenProtector.protectDataLeakageWithBlur();
+    //     }
+    //   } catch (e) {
+    //     if (kDebugMode) debugPrint('[screen_capture_guard] protect failed: $e');
+    //   }
+    return;
   }
 
   Future<void> release() async {

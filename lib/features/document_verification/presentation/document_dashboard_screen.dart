@@ -6,6 +6,7 @@ import 'package:untitled2/core/biometrics.dart';
 import 'package:untitled2/core/device_identity.dart';
 import 'package:untitled2/core/secure_storage.dart';
 import 'package:untitled2/features/document_verification/data/document_api_client.dart';
+import 'package:untitled2/features/document_verification/data/ocr_service.dart';
 import 'package:untitled2/features/document_verification/data/document_polling_service.dart';
 import 'package:untitled2/features/document_verification/data/document_repository_impl.dart';
 import 'package:untitled2/features/document_verification/data/document_source.dart';
@@ -52,6 +53,7 @@ class _DocumentDashboardScreenState extends State<DocumentDashboardScreen> {
       repository: repo,
       source: PlatformDocumentSource(),
       biometrics: PlatformBiometrics(),
+      ocrService: MLKitOcrService(),
     );
   }
 

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -175,6 +176,132 @@ class AuditEntry {
       );
 }
 
+// =====================================================================
+// OCR result types
+//
+// Mirrors ML Kit's `RecognizedText` / `TextBlock` / `TextLine` shape but
+// kept in `domain/` so feature widgets and tests don't depend on the
+// vendor SDK. The OCR service maps from ML Kit DTOs into these types.
+// =====================================================================
+
+@immutable
+class OcrTextLine {
+  const OcrTextLine({required this.text, required this.boundingBox});
+
+  /// Raw recognised text for the line.
+  final String text;
+
+  /// Axis-aligned bounding box in **image** coordinates (not screen). The
+  /// custom render object scales these to fit the rendered image.
+  final Rect boundingBox;
+
+  Map<String, dynamic> toJson() => {
+        'text': text,
+        'box': [boundingBox.left, boundingBox.top, boundingBox.right, boundingBox.bottom],
+      };
+
+  factory OcrTextLine.fromJson(Map<String, dynamic> json) {
+    final b = (json['box'] as List).cast<num>();
+    return OcrTextLine(
+      text: json['text'] as String,
+      boundingBox: Rect.fromLTRB(
+        b[0].toDouble(),
+        b[1].toDouble(),
+        b[2].toDouble(),
+        b[3].toDouble(),
+      ),
+    );
+  }
+}
+
+@immutable
+class OcrTextBlock {
+  const OcrTextBlock({
+    required this.text,
+    required this.boundingBox,
+    required this.lines,
+  });
+
+  final String text;
+  final Rect boundingBox;
+  final List<OcrTextLine> lines;
+
+  Map<String, dynamic> toJson() => {
+        'text': text,
+        'box': [boundingBox.left, boundingBox.top, boundingBox.right, boundingBox.bottom],
+        'lines': lines.map((l) => l.toJson()).toList(),
+      };
+
+  factory OcrTextBlock.fromJson(Map<String, dynamic> json) {
+    final b = (json['box'] as List).cast<num>();
+    return OcrTextBlock(
+      text: json['text'] as String,
+      boundingBox: Rect.fromLTRB(
+        b[0].toDouble(),
+        b[1].toDouble(),
+        b[2].toDouble(),
+        b[3].toDouble(),
+      ),
+      lines: ((json['lines'] as List?) ?? const [])
+          .cast<Map<String, dynamic>>()
+          .map(OcrTextLine.fromJson)
+          .toList(),
+    );
+  }
+}
+
+/// Structured OCR output for one document, plus any field extraction the
+/// post-processing isolate produced (e.g. "Surname", "Date of Birth").
+@immutable
+class OcrResult {
+  const OcrResult({
+    required this.fullText,
+    required this.blocks,
+    required this.imageSize,
+    required this.processedAt,
+    this.fields = const {},
+  });
+
+  /// Concatenation of every recognised block in reading order.
+  final String fullText;
+
+  /// Structured blocks for overlay rendering.
+  final List<OcrTextBlock> blocks;
+
+  /// Pixel size of the source image. Required so the render object can
+  /// translate bounding boxes into render-space.
+  final Size imageSize;
+
+  final DateTime processedAt;
+
+  /// Heuristic field extraction (e.g. {'surname': 'DOE', 'dob': '1990-01-15'}).
+  /// Computed in an isolate by `OcrFieldExtractor`.
+  final Map<String, String> fields;
+
+  Map<String, dynamic> toJson() => {
+        'fullText': fullText,
+        'blocks': blocks.map((b) => b.toJson()).toList(),
+        'imageSize': [imageSize.width, imageSize.height],
+        'processedAt': processedAt.toIso8601String(),
+        'fields': fields,
+      };
+
+  factory OcrResult.fromJson(Map<String, dynamic> json) {
+    final s = (json['imageSize'] as List).cast<num>();
+    return OcrResult(
+      fullText: json['fullText'] as String,
+      blocks: ((json['blocks'] as List?) ?? const [])
+          .cast<Map<String, dynamic>>()
+          .map(OcrTextBlock.fromJson)
+          .toList(),
+      imageSize: Size(s[0].toDouble(), s[1].toDouble()),
+      processedAt: DateTime.parse(json['processedAt'] as String),
+      fields: ((json['fields'] as Map?) ?? const {})
+          .cast<String, String>(),
+    );
+  }
+}
+
 /// File payload kept alongside the document so retry can re-upload without
 /// asking the user to re-pick. Bytes live in memory; a real impl would
 /// stream them from disk.
@@ -216,6 +343,8 @@ class Document {
     this.issues = const [],
     this.rejectionReason,
     this.bytes,
+    this.thumbnailBytes,
+    this.ocrResult,
   });
 
   /// Stable client-side id. Survives offline → online → retry cycles.
@@ -247,6 +376,16 @@ class Document {
   /// Optional in-memory file bytes for retry. Not persisted.
   final DocumentBytes? bytes;
 
+  /// Compressed thumbnail bytes (typically 320 px JPG, ~50–80 KB) used by
+  /// the dashboard preview and the custom render-object preview. Built in
+  /// an isolate by `ImageProcessor.thumbnail`. Not persisted — regenerated
+  /// from `bytes` if needed.
+  final Uint8List? thumbnailBytes;
+
+  /// OCR output for image-based documents. `null` for PDFs and for
+  /// documents whose OCR pass hasn't completed yet.
+  final OcrResult? ocrResult;
+
   final List<AuditEntry> audit;
 
   Document copyWith({
@@ -263,6 +402,8 @@ class Document {
     bool clearRejection = false,
     DocumentBytes? bytes,
     bool clearBytes = false,
+    Uint8List? thumbnailBytes,
+    OcrResult? ocrResult,
     List<AuditEntry>? audit,
   }) {
     return Document(
@@ -284,6 +425,8 @@ class Document {
       rejectionReason:
           clearRejection ? null : (rejectionReason ?? this.rejectionReason),
       bytes: clearBytes ? null : (bytes ?? this.bytes),
+      thumbnailBytes: thumbnailBytes ?? this.thumbnailBytes,
+      ocrResult: ocrResult ?? this.ocrResult,
       audit: audit ?? this.audit,
     );
   }
@@ -307,6 +450,13 @@ class Document {
         'confidence': confidence,
         'issues': issues,
         'rejectionReason': rejectionReason,
+        // Thumbnail bytes are small (~50 KB JPG) and content-addressed by
+        // the document checksum, so persisting them in SharedPreferences
+        // is acceptable. Full upload bytes are NOT persisted — they live
+        // in memory only during the upload session.
+        if (thumbnailBytes != null)
+          'thumbnailBytes': base64Encode(thumbnailBytes!),
+        if (ocrResult != null) 'ocrResult': ocrResult!.toJson(),
         'audit': audit.map((e) => e.toJson()).toList(),
       };
 
@@ -333,6 +483,12 @@ class Document {
         confidence: (json['confidence'] as num?)?.toDouble(),
         issues: (json['issues'] as List?)?.cast<String>() ?? const [],
         rejectionReason: json['rejectionReason'] as String?,
+        thumbnailBytes: json['thumbnailBytes'] is String
+            ? base64Decode(json['thumbnailBytes'] as String)
+            : null,
+        ocrResult: json['ocrResult'] is Map<String, dynamic>
+            ? OcrResult.fromJson(json['ocrResult'] as Map<String, dynamic>)
+            : null,
         audit: ((json['audit'] as List?) ?? const [])
             .cast<Map<String, dynamic>>()
             .map(AuditEntry.fromJson)

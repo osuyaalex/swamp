@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:untitled2/features/document_verification/domain/entities/document.dart';
 
 abstract class DocumentRepository {
@@ -40,6 +42,15 @@ abstract class DocumentRepository {
     required AuditKind kind,
     required String message,
     String actor = 'You',
+  });
+
+  /// Attach an isolate-produced thumbnail and/or OCR result to a document
+  /// after the optimistic upload has already returned. Either argument
+  /// may be `null` to skip that enrichment.
+  Future<void> updateEnrichment({
+    required String documentId,
+    Uint8List? thumbnailBytes,
+    OcrResult? ocrResult,
   });
 
   /// Release timers, websocket, etc. Called when the app shuts down.

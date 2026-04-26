@@ -1,0 +1,1019 @@
+SWAMP — A friendly walkthrough
+================================
+
+This is the version of the docs you read on the train, not the one
+you write a thesis from. Every section answers three questions in
+plain English:
+
+  - What is this thing?
+  - Where do I find it in the code?
+  - What do I do during the demo, and what do I say when asked?
+
+Read it once before recording the video. Skim it the morning of any
+interview. If anything in here still feels confusing, that's a flag —
+ask me before the call so we can untangle it together rather than
+in front of the interviewer.
+
+What's covered:
+
+  1. The task board (Phase 1)
+  2. The document feature (Phase 2)
+  3. The security stuff we added on day 2
+  4. The bonus features we added on day 3
+  5. How the project is laid out
+  6. A minute-by-minute plan for the video
+  7. The questions interviewers actually ask
+  8. Things I deliberately didn't build (and why)
+  9. Things that bit us on real devices (already fixed)
+
+
+==============================================================
+1. THE TASK BOARD
+==============================================================
+
+This is the Trello-style board. Three columns — To Do, In Progress,
+Done. You can add tasks, edit them, drag them around, comment, and
+look at the activity history.
+
+
+### Creating, editing, and deleting tasks
+
+What it is: the basics. Tap the plus button, fill in a title and a
+description, hit save. You can make text **bold** or *italic* in the
+description by selecting it and tapping the formatting buttons — under
+the hood it just wraps the text with markdown markers, which we render
+back as styled text when the card displays.
+
+Where to find it:
+  task_board_controller.dart:56  (createTask)
+  task_board_controller.dart:80  (editTask)
+  task_board_controller.dart:146 (deleteTask)
+  widgets/rich_text.dart         (the bold/italic editor + parser)
+
+Demo: Hit the plus button. Type a title. Type a description and use
+the bold/italic toolbar. Save. The card appears at the top of To Do
+instantly. Tap it again — there's already an entry in the activity
+feed saying "Task created."
+
+What to say if asked: "Rich text without a heavy library. The
+description supports bold and italic via markdown markers, parsed
+with one regex. I considered flutter_quill but it would have been
+bigger than the rest of the feature combined."
+
+
+### The drag-and-drop
+
+This is the most interesting part of the task board. When you long-
+press a card, three things happen at once:
+
+  - Your phone vibrates a little (a "haptic")
+  - The card lifts up off the page with a shadow underneath
+  - It tilts slightly, like a real piece of paper being picked up
+
+Then while you drag, you'll see:
+
+  - The card you grabbed turns ghostly where it used to be
+  - A blue rectangle opens up between cards to show where the new
+    card will land if you let go
+  - If you drag near the bottom of a column, the column scrolls to
+    let you reach more cards
+  - On a phone, if you drag near the edge of the screen, the whole
+    board scrolls horizontally
+  - On a phone, when you drop on a different column, that column
+    smoothly slides into the centre of your screen so you can see
+    where the card landed
+
+When you let go, the ghost glides into its final position with a
+little animation. If you let go outside any column (off-screen, or
+in dead space), the ghost flies back to where it came from and
+nothing changes.
+
+I did NOT use Flutter's built-in drag widget for this. Flutter has
+something called `Draggable` and `DragTarget`, but they're missing
+shadows, edge-scrolling, and haptics. Building it from scratch was
+a few hundred lines of code but every bit of it was needed.
+
+Where to find it:
+  drag/drag_controller.dart  — the brain of the gesture (state,
+                                pointer tracking, where to drop)
+  drag/drag_overlay.dart      — the floating ghost that follows
+                                your finger
+  widgets/task_card.dart      — wires the long-press gesture to
+                                the controller
+  widgets/task_column.dart    — the animated drop-slot indicator
+
+Specific lines worth knowing:
+  start (when long-press fires):                  drag_controller.dart:96
+  the snap-into-place drop:                       drag_controller.dart:128
+  the snap-back-to-source cancel:                 drag_controller.dart:164
+  edge auto-scroll:                               drag_controller.dart:273
+  centre-the-destination-column animation:        drag_controller.dart:152
+  drop slot indicator that opens between cards:   widgets/task_column.dart:213
+
+Demo: long-press a card in To Do. Drag it across to In Progress.
+Notice the destination column slides into centre as you drop.
+Drag another card and let go off-screen — it snaps back. Drag near
+the bottom of a long column — it auto-scrolls.
+
+What to say if asked: "Flutter ships a built-in drag widget but it
+can't do shadows, edge auto-scroll, or haptics. I built a custom
+gesture engine — long-press starts a state machine, the ghost lives
+in a Stack overlay above the board, and a Ticker drives the auto-
+scroll so the speed is consistent on 60Hz and 120Hz screens."
+
+
+### The dropdown / drop-slot animation
+
+When you drag a card, you see a blue rectangle open up between the
+other cards to show where it'll land. That rectangle isn't fake —
+it's a real animated widget that opens or collapses based on where
+your finger is.
+
+Where:  widgets/task_column.dart:213 (the _DropSlot widget)
+
+This is one of the moments where Flutter's animation system shines.
+The slot uses `AnimatedContainer` — give it a different height, it
+animates to that height. We pair it with a `Selector` (a way to
+listen to ONLY a piece of state instead of the whole controller) so
+each slot only redraws when its own situation changes, not on every
+finger movement.
+
+
+### Comments and activity history
+
+Each task keeps a list of comments and a list of audit entries (we
+call them "activity entries"). Anything that happens to a task —
+created, edited, moved between columns, priority changed, comment
+added — appends an entry. The activity feed in the detail sheet
+shows them newest-first.
+
+Where:  task.dart (Comment, ActivityEntry types)
+        task_board_controller.dart (every method that mutates a
+        task appends an activity entry)
+
+Demo: open a task. Type a comment, hit send. Watch it appear in the
+list. Below that, the activity feed shows "X commented" plus all
+the previous events.
+
+
+### One technical thing worth knowing — modal sheets and providers
+
+This sounds boring but it bit us hard. When you tap a card to open
+its details, that opens a "modal bottom sheet" — a screen that
+slides up from the bottom. The catch: Flutter pushes those sheets
+into a different "container" in the widget tree, and they can't
+see the data we set up at the screen level.
+
+The fix is short but important: every sheet's `show()` method
+captures the controller from the calling code and re-provides it
+inside the sheet. If you ever add a new sheet, do the same.
+
+Where every sheet does this trick:
+  task_editor_sheet.dart:14
+  task_detail_sheet.dart:15
+  upload_sheet.dart:13
+  document_detail_sheet.dart:15
+  document_camera_screen.dart:43
+
+If asked: "Modal routes are pushed under the root navigator, so
+they're outside the screen-level provider scope. Every sheet
+captures the controller from its calling context and re-provides
+it. Same trick across all five sheets."
+
+
+==============================================================
+2. THE DOCUMENT FEATURE
+==============================================================
+
+This is the second tab — KYC document verification. The user uploads
+an ID/passport/utility bill, the "server" verifies it, and the user
+sees the result.
+
+We don't have a real server. We have a fake one called
+MockDocumentBackend. It mimics what a real backend would do: returns
+a document id from upload, then sends progress updates over a
+WebSocket as it "processes" the document, and finally either approves
+or rejects it.
+
+
+### How an upload feels
+
+When you pick a document:
+
+  - The card appears in your list immediately, with a spinner saying
+    "Uploading"
+  - A few seconds later, the spinner becomes a progress bar, and the
+    text changes to "Processing — Optical character recognition"
+  - The progress bar moves through three stages: OCR, then field
+    extraction, then authenticity check
+  - About 12 seconds in, the document ends up Verified (green) or
+    Rejected (red, with a reason)
+
+This whole flow is designed to feel fast even though the network
+"call" takes 900ms. We use something called an "optimistic update":
+we add the card to the list BEFORE the network call returns. If the
+call fails, we roll the card back to a "queued" state with a retry
+button — the bytes stick around so you don't have to re-pick the file.
+
+Where:
+  upload (with the rollback):    document_repository_impl.dart:159
+  the fake backend:               mock_document_backend.dart
+  the three stages:               mock_document_backend.dart:158
+  rejection messages list:        mock_document_backend.dart:240
+
+Demo: tap +, pick a type, pick a source. Watch the card race through
+the stages. Most of the time it'll end up Verified. About 1 in 4
+will be Rejected (we set the rate to 0.25). If you want to demo the
+rejection flow specifically, you can change `rejectionRate: 0.25`
+to `rejectionRate: 1.0` in `MockDocumentBackend()` so every upload
+gets rejected, then back to 0 after.
+
+If asked: "Optimistic upload — the card is in the list before the
+HTTP call completes, so the user sees instant feedback. On failure
+I roll back to a 'queued' state and keep the bytes attached so retry
+doesn't ask the user to re-pick the file."
+
+
+### The connection banner (real-time updates)
+
+The document feature has its own banner at the top, separate from
+the global offline banner. This one tracks the WebSocket connection
+specifically. When the WebSocket drops (which we make happen every
+~30 seconds for the demo, otherwise you'd never see the reconnect
+logic actually run), you see "Reconnecting…" in orange, and then
+when it comes back you see nothing — the banner just disappears.
+
+While the WebSocket is offline, we fall back to polling — calling
+the status endpoint every 4 seconds — so the UI keeps updating even
+without real-time. When the WebSocket reconnects, polling stops.
+
+Where:
+  the WebSocket itself:          document_websocket_client.dart
+  the simulated drops:           document_websocket_client.dart:77
+  exponential backoff:           document_websocket_client.dart:95
+  the polling fallback:          document_polling_service.dart
+  the state machine that picks: document_repository_impl.dart:280
+                                  (the _onConnectionChanged method)
+
+Demo: just wait ~30 seconds during the recording. The banner will
+show up automatically. You can also tap it to manually trigger a
+reconnect within ~200ms.
+
+If asked: "Two layers — WebSocket for live pushes when connected,
+polling as a fallback when not. Both feed updates into the same
+single piece of code so they can't drift apart on what 'verified'
+means. WebSocket reconnect uses exponential backoff capped at 30
+seconds: 1, 2, 4, 8, 16, 30."
+
+
+### What happens when you kill the app
+
+Documents are saved to the device. Their pictures are NOT — files
+can be megabytes and we don't want to bloat shared preferences. So
+when you kill the app and relaunch, you'll see all your uploaded
+documents in the list, but if any was mid-upload when you killed
+the app, it shows up as "Queued" with a retry button.
+
+Where:
+  saving:    document_repository_impl.dart  (the _persist method)
+  loading:   document_repository_impl.dart  (the _hydrate method)
+
+Demo: upload a doc, wait for verified, kill the app, relaunch. Doc
+is still there.
+
+
+==============================================================
+3. THE SECURITY STUFF (Day 2)
+==============================================================
+
+The brief weights "Security & Compliance" at 10% of the score. We
+shipped five small features that put real code behind the security
+story — not just paragraphs in the architecture doc.
+
+
+### Secure storage (the device's safe)
+
+What it is: a small wrapper around the operating system's built-in
+"safe place." On iPhone it's called Keychain. On Android it's called
+the AndroidKeyStore. Both are designed for storing sensitive values
+that shouldn't be readable by other apps.
+
+We use it to store two things right now:
+  - A unique device id (we generate one on first run)
+  - A signing key for the audit trail (more on that below)
+
+In production we'd also put auth tokens and encryption keys here.
+Today we don't have those yet, but the slot is built.
+
+Where:
+  core/secure_storage.dart  — the wrapper interface and platform impl
+
+Demo (tricky to demo visually): upload a document, kill the app,
+upload another. Both audit entries will have the same device id —
+proving it survived the restart because it was in secure storage.
+
+If asked: "Same `SecureStorage` interface that would hold auth
+tokens or encryption keys in production. Currently it holds the
+audit signing key and a per-device id."
+
+
+### Audit signing (tamper-evident timeline)
+
+Every entry in a document's audit timeline carries:
+  - Who did it (you, or 'system')
+  - From which device
+  - The app version
+  - A signature (HMAC) over the entry's contents
+  - A "previous hash" — the hash of the previous entry's signature
+
+That last bit is the tamper-evident chain. If someone edits an
+entry after the fact, every later entry's signature stops matching.
+An auditor can walk the chain and prove nothing was altered.
+
+Where:
+  the signing logic:        core/audit_signing.dart
+  the chain construction:   document_repository_impl.dart  (the
+                            _buildAudit method)
+  the extended audit shape: document.dart  (the AuditEntry class)
+
+Demo: open a document detail. The audit timeline shows multiple
+entries. The cryptographic fields aren't visible in the UI — say
+to the interviewer: "Each of these entries also carries a signature
+and a hash of the previous entry. If anyone tampered with the log,
+the chain would break. I built it the way KYC compliance auditors
+expect to see it."
+
+If asked: "Tamper-evident HMAC chain. Each entry signs over the
+previous entry's signature, so any edit invalidates every later
+entry's signature. An auditor verifies linearly."
+
+
+### The biometric gate
+
+Verified documents are protected behind Face ID / Touch ID / your
+phone's fingerprint reader. Tapping a verified card triggers a
+biometric prompt. If you pass, the detail sheet opens and the audit
+log records "access granted via biometric." If you fail, you get a
+snackbar saying access denied, and the audit log records the
+denial.
+
+If your phone has no biometric set up, we let access through but
+log it as "no biometric available." This is intentional — soft-
+locking a user out of their own data because their phone has no
+fingerprint reader is the wrong tradeoff.
+
+Where:
+  the biometric wrapper:  core/biometrics.dart
+  the gate itself:         document_dashboard_screen.dart:104
+  Android prerequisite:   MainActivity.kt extends FlutterFragmentActivity
+                          (otherwise the plugin throws a platform
+                          exception)
+
+Demo: tap a Verified card. Pass the biometric. Look at the audit —
+new entry: "Access granted via biometric." Tap another verified
+card, cancel the biometric, see the snackbar, see the new "Access
+denied" audit entry.
+
+If asked: "Real biometric prompt via local_auth. Works with Face ID
+on iOS, BiometricPrompt on Android. The audit captures both
+successful and failed attempts because compliance auditors care
+about access patterns, not just successful access."
+
+
+### Screenshot blocker (Android only, mostly)
+
+When you're on the Documents tab, the app tells the operating system
+"refuse any screenshot or screen recording attempts on this window."
+
+  - On Android: it works. Try to take a screenshot, you'll get a
+    system message saying "can't take screenshot due to security
+    policy."
+  - On iOS: Apple doesn't give us an API to block screenshots. The
+    best we can do is detect when the user starts a screen recording
+    and overlay a blur. That's what the code does on iOS, but you
+    can't easily test it in the simulator.
+
+When you switch back to the Tasks tab, normal screenshots work again
+(reference-counted toggle).
+
+Important: I temporarily disabled this for the video so I could
+record. To re-enable for the final submission:
+  1. In core/screen_capture_guard.dart, uncomment the body of
+     `protect()` and remove the `return;` at the bottom.
+  2. In app/home_shell.dart, remove the
+     `ScreenProtector.protectDataLeakageOff()` line in initState.
+  3. flutter clean && flutter run.
+
+Where:
+  the wrapper:    core/screen_capture_guard.dart
+  the trigger:    app/home_shell.dart  (_syncScreenGuardFor)
+
+If asked: "Reference-counted screen guard. On Android it sets
+FLAG_SECURE; on iOS we use the screen_protector package's
+detection-and-blur approach because Apple doesn't expose
+screenshot blocking."
+
+
+### The offline banner
+
+A red banner at the top of the screen that appears when your phone
+loses all network connections (Wi-Fi off AND cellular off). It
+disappears as soon as connectivity comes back. Different from the
+WebSocket banner — that one tracks the SWAMP connection
+specifically; this one tracks the device's network state in
+general.
+
+Where:
+  the watcher:    core/connectivity_state.dart
+  the banner UI:  app/home_shell.dart  (_OfflineBanner)
+
+Demo: turn on airplane mode. Banner appears. Turn it off. Banner
+disappears.
+
+If asked: "The connectivity_plus package tells us when there's no
+adapter active. It doesn't guarantee the SWAMP server is reachable —
+DNS or captive portals could still block traffic. For a stronger
+signal we'd combine this with periodic API probes."
+
+
+==============================================================
+4. THE BONUS FEATURES (Day 3)
+==============================================================
+
+The brief lists seven "bonus" features that get extra credit if
+implemented. We did four of them. Each adds something visible to
+the demo.
+
+
+### OCR — reading text out of images
+
+After you upload a document image, we run on-device text recognition
+on it (using Google's free ML Kit). The recognized text shows up in
+the document detail sheet two ways:
+
+  - Each block of recognized text becomes a tappable rectangle
+    overlaid on the image. Tap any rectangle to copy that text.
+  - We also try to extract specific fields (Surname, Date of Birth,
+    Document Number, Expiry) using regex patterns. If the image is
+    a typical KYC document with those labels printed on it, you'll
+    see chips at the top of the detail sheet showing the extracted
+    values.
+
+If you upload a photo of yourself, the chips won't appear because
+your face doesn't say "Surname:" anywhere. That's correct behaviour —
+the chips are targeted at standard KYC document layouts. The
+tap-to-copy overlays still work on any text in any image.
+
+Where:
+  the OCR types:        domain/entities/document.dart:182  (OcrResult, OcrTextBlock)
+  the OCR service:      data/ocr_service.dart
+  the field extractor:  data/ocr_service.dart:131 (the regex set)
+  wired into upload:    document_dashboard_controller.dart  (_enrichWithOcr)
+
+Demo: upload a "specimen passport" image (search Google Images for
+that). Open the detail. Chips appear at the top: Surname, Given
+names, DOB. Pinch-zoom on the preview. Tap any text rectangle —
+copies to clipboard, snackbar confirms.
+
+If asked why this dependency: "On-device for privacy and cost. KYC
+images shouldn't leave the device for cloud OCR. Cloud Vision API
+costs per call. ML Kit is free at any scale, runs offline, has a
+maintained Flutter package. I considered Tesseract but it's older
+and more setup pain."
+
+
+### Isolates — heavy work off the main thread
+
+Some operations in the app are CPU-heavy and would otherwise freeze
+the UI for ~50-100 milliseconds. We push those into "isolates" —
+which is Dart's name for separate worker threads.
+
+What runs in isolates:
+  - Generating thumbnails (decoding the image, resizing, re-
+    encoding as JPEG)
+  - Computing the file checksum (a non-cryptographic hash over the
+    bytes)
+  - Running the OCR field-extraction regex pass
+
+Without this, picking a 5MB photo would freeze the app for almost
+a second while the checksum is computed. With it, the UI keeps
+animating smoothly and the result arrives a moment later via a
+future.
+
+Where:
+  the isolate wrappers:  core/image_processor.dart
+                          (thumbnail, checksum, imageSize)
+  used by the picker:    data/document_source.dart  (calls
+                          ImageProcessor.checksum)
+  used in the OCR path:  data/ocr_service.dart:99 (Isolate.run for
+                          field extraction)
+
+Demo: this is invisible by design. If you want to demonstrate it,
+record the app in profile mode and show the DevTools timeline —
+you'll see distinct isolate slices when picking a large photo.
+
+If asked: "Compute-bound work that doesn't need the UI thread.
+Isolate.run ships the bytes to a fresh isolate, runs the work,
+returns the result. The calling code awaits asynchronously so the
+UI keeps rendering frames during the work."
+
+
+### The custom render object — for the document preview
+
+When you open a verified document's detail, you see a preview area
+with the document image and colored rectangles drawn over each
+recognized text block. That preview area is built with what Flutter
+calls a "custom render object" — that means we wrote our own
+low-level widget instead of composing existing ones.
+
+Why? Because we needed two things at the same time:
+  - Custom drawing (the image plus the text-block overlays)
+  - Custom touch handling (tapping a rectangle copies its text;
+    pinching anywhere zooms; dragging anywhere pans)
+
+Flutter's regular CustomPainter can do the drawing but can't help
+with hit-testing. A real RenderBox can do both, sharing one
+coordinate system between paint and tap detection.
+
+Where:
+  widgets/document_preview.dart
+  - the public widget:           line 41 (DocumentPreview)
+  - the render object proper:    line 184 (_RenderDocumentPreview)
+  - the paint method:             line 263
+  - the hit-test (which block was tapped): line 336
+  - pinch and pan recognisers:   line 197
+
+Demo: open a verified document's detail. The preview at the top
+shows your document with overlay rectangles on every recognized
+word. Pinch to zoom. Pan around. Tap any rectangle — the text gets
+copied to your clipboard, the rectangle highlights, snackbar confirms.
+
+If asked: "I needed both custom paint AND block-aware hit testing.
+A CustomPainter wrapped in a GestureDetector would only know that
+SOMETHING in the area was tapped, not which text block. Writing a
+real RenderBox lets paint and hit-test share the same coordinates
+so taps map back to specific blocks."
+
+
+### Custom camera — real-time edge detection
+
+If you tap "Scan with custom camera" in the upload sheet, you get a
+full-screen scanner instead of the system camera. Live preview, with
+green corner brackets that animate to follow the edges of whatever
+document you point at. A pill at the top tells you "Document
+detected" when confidence is high. Tap the capture button to take
+the shot.
+
+The edge detection is real — we sample camera frames at about 6
+times per second, compute gradients, and find the strongest
+horizontal and vertical edges. That's the document's likely
+bounding box. We map that back to screen coordinates and the
+corner brackets animate there.
+
+Where:
+  the edge detection algorithm:  core/edge_detection.dart
+  the camera screen:              sheets/document_camera_screen.dart
+  the scanner overlay paint:      document_camera_screen.dart:297
+
+Demo: tap +, pick a type, tap "Scan with custom camera." Aim at any
+printed page. Watch the corner brackets snap to the page edges.
+Capture.
+
+If asked: "Sobel-style gradient on the camera's luma plane,
+downsampled to 160 pixels wide for speed. Find dominant horizontal
+and vertical edges, pick two well-separated peaks per axis, that's
+the document's bounding rect. Not a four-corner perspective fit —
+that would need Hough lines and a corner solver, out of scope."
+
+
+==============================================================
+5. HOW THE PROJECT IS LAID OUT
+==============================================================
+
+  lib/
+  ├── app/                      ← navigation shell (the bottom nav)
+  ├── core/                     ← shared utilities used by both features
+  ├── features/
+  │   ├── task_board/
+  │   │   ├── data/             ← in-memory storage
+  │   │   ├── domain/           ← what a Task is, abstract storage interface
+  │   │   └── presentation/     ← screen, controller, drag, widgets, sheets
+  │   └── document_verification/
+  │       ├── data/             ← mock backend, websocket, polling, repo
+  │       ├── domain/           ← what a Document is, abstract repo interface
+  │       └── presentation/     ← screen, controller, widgets, sheets
+  ├── home.dart
+  └── main.dart
+
+The most important rule: the two features in `lib/features/` import
+nothing from each other. Both share only `lib/core/`. That's how we
+answer the brief's question about scaling to a 4-developer team —
+two teams own one feature each, with `core/` as their only shared
+dependency.
+
+Inside each feature, the rule is similar: presentation talks to
+abstract interfaces in domain. The concrete data implementations
+are wired in just one place (the screen's initState). That means
+swapping in a real database later is a one-line change, not a
+rewrite.
+
+
+==============================================================
+6. DEMO PLAN (for the 8-10 min video)
+==============================================================
+
+Settings to lock in BEFORE you start recording:
+
+  - In MockDocumentBackend (mock_document_backend.dart line 79),
+    set rejectionRate: 0.0 if you want a guaranteed verified flow,
+    or 1.0 if you want to demo rejection. You'll re-record between
+    those if you want both flows.
+  - Phone NOT in airplane mode at start.
+  - Biometric is enrolled on the device (Face ID / fingerprint).
+  - Pull a "specimen passport" image off Google for the OCR demo.
+    Save it to your photo library beforehand so the picker can
+    grab it without you typing.
+
+Recommended structure (you can rearrange):
+
+00:00 — 00:30  Intro
+  Brief description, what you built, what we're going to see.
+
+00:30 — 03:00  Phase 1: tasks
+  - Show the seeded board.
+  - Create a new task with bold/italic in the description.
+  - Open it. Add a comment.
+  - Long-press a card. Drag from To Do across to Done.
+    Mention the centred-column animation as you drop.
+  - Drag and release outside any column to demo the cancel snap.
+  - Drag near the bottom of a column to demo auto-scroll.
+
+03:00 — 06:00  Phase 2: documents
+  - Switch tabs. Mention IndexedStack ("the task board's drag
+    controller is still alive over there").
+  - Tap "Scan with custom camera." Capture something. Watch it
+    upload, process, verify.
+  - Wait for the websocket banner to appear (~30 seconds in).
+    Tap to manually reconnect.
+  - On Android only: try a screenshot — blocked by FLAG_SECURE.
+    (Or skip this if you've disabled the guard for recording.)
+  - Tap a verified card. Biometric prompt. Pass it. Detail sheet
+    opens. Show the audit timeline. Show the document preview.
+    Pinch to zoom. Tap a recognized text block to copy it.
+
+06:00 — 08:00  Architecture (no code on screen, just narration)
+  - Feature-first layout. Two features, one shared core, no cross-
+    imports. That's the answer to scaling for a team.
+  - Repository pattern in domain/ — swappable storage. Today
+    in-memory + mock backend; production would be Drift + real
+    HTTP.
+  - Single-funnel for status updates: WebSocket and polling both
+    feed one method, so they can't drift apart on what 'verified'
+    means.
+  - Optimistic upload with rollback. Card lands in the list before
+    the network call resolves.
+
+08:00 — 09:30  Bonus features
+  - On-device OCR — privacy, cost, offline.
+  - Custom render object for the document preview — paint AND
+    hit-test in one widget so taps map back to specific text blocks.
+  - Heavy work in isolates so the UI stays smooth during uploads.
+  - Custom camera with real-time edge detection — pure-Dart Sobel
+    on the luma plane, in an isolate.
+
+09:30 — 10:00  Wrap
+  - The README, ARCHITECTURE.md, PERFORMANCE.md, and lib/explanation
+    cover the rest in writing.
+  - Available for any questions.
+
+
+==============================================================
+7. THE QUESTIONS YOU'LL ACTUALLY GET ASKED
+==============================================================
+
+I've grouped these by likely first question. For each one, the
+short answer first (read this aloud), then a follow-up only if
+they push.
+
+
+### "Walk me through the architecture."
+
+Short answer: Two features under lib/features/ — tasks and
+documents. They share only lib/core/. Inside each feature, three
+folders: domain (the data shapes), data (the storage implementation),
+presentation (the UI). The widgets only ever talk to the controller;
+the controller only ever talks to the abstract repository in
+domain/. The concrete repository is wired in once, at the screen
+level. Swapping to a real database later is a one-line change.
+
+If pushed: walk through one feature path top to bottom — "when
+you tap upload, here's exactly what happens" — using the document
+feature.
+
+
+### "Why provider, not Bloc or Riverpod?"
+
+Short answer: For one screen per feature with no cross-screen
+state, Bloc would push me to write event classes for every CRUD
+call — boilerplate that doesn't earn its keep. Riverpod's
+compile-time DI is nice, but the dependency graph here is small
+enough to read directly in the screen's initState. Provider got
+me what I needed with less ceremony.
+
+If pushed: "The architecture isn't tied to provider. The
+controllers are just ChangeNotifiers — I could swap them for
+Cubits or Notifiers without rewriting the business logic."
+
+
+### "Why a custom drag and drop?"
+
+Short answer: Flutter ships a Draggable widget but it can't do
+shadow previews, can't auto-scroll when you drag near an edge,
+and doesn't trigger haptics. The brief asked for all three. So
+I built a custom gesture engine with a state machine, a Stack-
+level overlay for the floating ghost, and a Ticker for frame-
+locked auto-scroll.
+
+If pushed about the state machine: "Four states — idle, dragging,
+dropping, cancelling. The transitions are explicit. Secondary
+long-presses during a drop animation are rejected; pointer cancel
+mid-drag triggers the snap-back-to-source path."
+
+
+### "Why on-device OCR specifically?"
+
+Short answer: Three reasons. Privacy — KYC images shouldn't leave
+the device for a cloud OCR pass. Cost — ML Kit is free at any
+volume; Cloud Vision charges per call. Latency — no network
+roundtrip during the upload flow.
+
+If pushed about alternatives: "Considered Tesseract via FFI —
+older, slower setup. Apple Vision is iOS only. Cloud Vision was
+ruled out for the reasons above. ML Kit is the standard mobile
+on-device choice."
+
+
+### "Why isolates here?"
+
+Short answer: Three pieces of work — generating thumbnails,
+computing file checksums, OCR field extraction — are CPU-bound
+and don't need the UI thread. On a 10MB image they'd block the
+UI for 50-100ms. Isolate.run pushes them to a separate worker
+thread so the UI keeps animating.
+
+If pushed: "Specifically the operations in
+core/image_processor.dart and the field-extractor regex pass
+inside ocr_service.dart at line 99. The native ML Kit text
+recognition itself already runs on its own native thread, so
+that doesn't need an isolate — but the post-processing does."
+
+
+### "Why did you write a custom render object?"
+
+Short answer: The document preview needs both custom drawing
+(image plus text-block overlays) AND custom hit-testing (taps map
+back to specific text blocks). A CustomPainter wrapped in a
+GestureDetector would only know that SOMETHING in the area was
+tapped, not which block. Writing a real RenderBox lets paint and
+hit-test share one coordinate system.
+
+If pushed: "It's in widgets/document_preview.dart at line 184. The
+gestures are also handled in the render object itself — a
+ScaleGestureRecognizer for pinch and pan, a TapGestureRecognizer
+for block-aware taps. The widget tree above this is one line."
+
+
+### "How would you swap in a real database?"
+
+Short answer: TaskRepository and DocumentRepository are abstract
+interfaces in domain/. I'd add a new file like
+data/drift_task_repository.dart that implements the same
+interface, change one line in the screen's initState from
+`InMemoryTaskRepository()` to `DriftTaskRepository(db)`, and the
+controllers, widgets, and sheets all keep working unchanged.
+
+If pushed about Drift specifically: "I'd pick Drift over Isar.
+Isar is faster but its maintenance momentum has wobbled lately
+and for a long-lived KYC product I want the conservative bet.
+Drift has the same SQLite engine with a typed code-generated API
+and reactive query streams — that last one matters because we
+want 'tell me when this list changes' subscriptions, not 'fetch
+me a snapshot' calls."
+
+
+### "What about state persistence?"
+
+Short answer: Documents persist as JSON in SharedPreferences. The
+file bytes themselves are NOT persisted — they could be megabytes
+each. On cold start, the hydrate logic walks the persisted list;
+anything in 'uploading' state gets repaired to 'queued' with bytes
+cleared, so the user is prompted to retry.
+
+If pushed: "It's in document_repository_impl.dart in the _persist
+and _hydrate methods. The repair logic is what makes the cold-start
+flow feel sane — without it, a 'still uploading' card from before
+the kill would have nowhere to recover."
+
+
+### "What's tested?"
+
+Short answer: 14 unit tests, all passing. Seven cover the
+TaskBoardController — CRUD flows, the within-column index
+off-by-one for drag reorder, comment + activity appends,
+notification scheduling. Seven cover the document stack —
+optimistic upload, rollback on failure, retry, persistence
+round-trip, websocket reconnect cycle, polling tick emission, and
+polling re-entry guard.
+
+If pushed about widget tests: "Drag and gesture flows aren't unit-
+tested because gesture timing in widget tests is fragile — that's
+what the demo video covers. Integration tests with patrol would
+be the next step."
+
+
+==============================================================
+8. WHAT WE DELIBERATELY DIDN'T BUILD
+==============================================================
+
+These are things the brief mentions but we chose not to build, with
+the reasons. Senior interviewers like to ask about omissions. Be
+ready.
+
+
+### Real backend
+
+The mock pipeline has the correct wire shapes — it returns the
+exact JSON a real server would. Swapping in package:http for the
+HTTP client and package:web_socket_channel for the WebSocket is a
+class-per-client change, not a rewrite.
+
+Why not built: the brief says explicitly "you do not need a live
+backend — stub or mock the responses." So we did, well.
+
+
+### Real local notifications
+
+The NotificationService interface is in place — used today by the
+task feature for due-date reminders. The implementation just logs
+to the debug console. The real implementation would use
+flutter_local_notifications.
+
+Why not built: notifications need Android and iOS native config —
+permission requests, app icons for the notification center, etc.
+That's a couple hours of setup for a feature that wouldn't be
+visible in the video.
+
+
+### Real encryption-at-rest of document bytes
+
+We talk about envelope encryption with AES-GCM in ARCHITECTURE.md.
+The key-management primitives (secure storage, signing key) are in
+place. AES-GCM via package:cryptography is described as the next
+step.
+
+Why not built: the bytes aren't persisted to disk in the first
+place — they live in memory during upload and get cleared on cold
+start. Encrypting them adds complexity without protecting against
+any actual attacker we have today.
+
+
+### CRDTs for offline task sync
+
+The brief lists this as a bonus item: "implement Phase 4 instead
+of writing it." We wrote Phase 4 (the offline section in
+ARCHITECTURE.md describes Lamport timestamps with field-level
+last-write-wins). Building real CRDTs is 15-20 hours of careful
+work — done badly they're worse than not done at all.
+
+Why not built: time/risk tradeoff. The written approach is
+defensible and the implementation would have eaten a day with high
+chance of subtle bugs.
+
+
+### Direct platform-channel code
+
+The brief's bonus list mentions "Platform channels for native
+biometric or secure enclave integration." We use platform channels
+already, just through plugins (local_auth, flutter_secure_storage,
+image_picker). Rolling our own channel code from scratch would
+add code surface without changing user-visible behaviour.
+
+Why not built: redundant. Our security primitives already use
+platform channels under the hood — we just don't write the channel
+code by hand.
+
+
+### GDPR endpoints (right to erasure, DSARs)
+
+The brief mentions "production-ready data handling" and we cover
+GDPR considerations in ARCHITECTURE.md. Building actual delete
+flows and DSAR exports needs a real backend to delete from / export
+out of.
+
+Why not built: requires a real server. Architecture is shaped to
+make this trivial when one exists.
+
+
+==============================================================
+9. THINGS THAT BIT US ON REAL DEVICES (already fixed)
+==============================================================
+
+This is your "I expected this to happen" cheat sheet. If anything
+weird shows up while testing, check this list first.
+
+
+### local_auth wants FlutterFragmentActivity, not FlutterActivity
+
+Symptom: biometric prompt fails with PlatformException
+("no_fragment_activity").
+
+Cause: the local_auth plugin's BiometricPrompt code requires the
+host activity to be a FragmentActivity. Flutter's default
+FlutterActivity isn't.
+
+Fix (already applied): MainActivity.kt extends
+FlutterFragmentActivity. File:
+  android/app/src/main/kotlin/com/example/untitled2/MainActivity.kt
+
+
+### Image-picker camera kills the app on Android
+
+Symptom: tap "Quick photo," camera launches, after capture either
+black screen or full app restart.
+
+Cause: when Android launches a camera intent, it can kill your
+Flutter process to free memory. When the user comes back, your
+process restarts cold and the original picker future never resolves.
+
+Fix (already applied): largeHeap="true" in AndroidManifest, plus
+retrieveLostData() recovery on the controller side. Files:
+  android/app/src/main/AndroidManifest.xml
+  document_source.dart
+  document_dashboard_controller.dart
+
+For the demo, prefer "Scan with custom camera." It's in-process
+and doesn't have this class of problem.
+
+
+### OCR field-chips don't appear on a selfie
+
+Symptom: you uploaded a photo of yourself and expected to see
+Surname / DOB chips. None appeared.
+
+Cause: the chips only appear when the regex pass finds literal
+KYC labels ("Surname:", "DOB:", etc.) in the recognized text. A
+selfie doesn't contain those labels, so no chips.
+
+Workaround: upload a specimen passport image or a printed page
+that contains those labels.
+
+Reality check: tap-to-copy on text overlays IS the OCR working —
+the chips are an extra heuristic on top.
+
+
+### iOS Simulator is unreliable for ML Kit
+
+Symptom: OCR results sparse or missing.
+
+Cause: ML Kit's iOS implementation has setup quirks the simulator
+sometimes doesn't satisfy.
+
+Fix: test OCR on a real iPhone. Everything else works in the
+simulator.
+
+
+### iOS doesn't actually block screenshots
+
+Symptom: you screenshotted the Documents tab on iOS and the
+screenshot worked.
+
+Cause: Apple gives no API to block screenshots. The screen-protector
+package on iOS only does blur on screen-recording detection.
+
+Fix: nothing we can do — platform limitation. Be honest about it
+in the interview.
+
+
+==============================================================
+END
+==============================================================
+
+If you find yourself defending this codebase in an interview:
+
+  - Lead with the short answers in section 7. They're calibrated
+    for 30-second responses.
+  - If they push for depth, point at file:line. That shows you
+    know the code, not just the talking points.
+  - If you genuinely don't know something: "I'd need to dig in to
+    give you a definite answer." Senior interviewers respect that
+    more than a confident bluff.
+
+If something acts strange on a real device:
+
+  - Try `flutter clean && flutter run` first. Most native config
+    changes need a fresh native build.
+  - Check `adb logcat` (Android) or Xcode console (iOS) for the
+    real error, not just the symptom.
+  - Section 9 above lists every gotcha we've already hit.
+
+Good luck. You built something solid. Defend it like you did.

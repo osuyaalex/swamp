@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 
+import 'package:untitled2/core/image_processor.dart';
 import 'package:untitled2/features/document_verification/domain/entities/document.dart';
 
 /// Where the user picked a document from.
@@ -12,6 +13,12 @@ enum DocumentSourceKind { camera, gallery, file }
 /// without touching `image_picker` / `file_picker`.
 abstract class DocumentSource {
   Future<DocumentBytes?> pick(DocumentSourceKind kind);
+
+  /// On Android, camera intents can be killed by the OS under memory
+  /// pressure. The plugin caches the picked file and exposes it via
+  /// `retrieveLostData`; call this on app resume to recover anything
+  /// that didn't make it back through the original future.
+  Future<DocumentBytes?> retrieveLostData();
 }
 
 /// Real implementation backed by `image_picker` and `file_picker`. Performs
@@ -72,7 +79,19 @@ class PlatformDocumentSource implements DocumentSource {
     return _validateAndWrap(bytes, file.name, _mimeFromName(file.name));
   }
 
-  DocumentBytes _validateAndWrap(Uint8List bytes, String name, String mime) {
+  @override
+  Future<DocumentBytes?> retrieveLostData() async {
+    final lost = await _imagePicker.retrieveLostData();
+    if (lost.isEmpty || lost.file == null) return null;
+    final file = lost.file!;
+    final bytes = await file.readAsBytes();
+    return _validateAndWrap(bytes, file.name, _mimeFromName(file.name));
+  }
+
+  /// Validate then wrap. Checksum runs in an isolate so we don't block
+  /// the UI for ~50ms on a 10 MB file before the upload card appears.
+  Future<DocumentBytes> _validateAndWrap(
+      Uint8List bytes, String name, String mime) async {
     if (!_allowedMimes.contains(mime)) {
       throw _PickerException(
         'Unsupported file type ($mime). Use JPG, PNG, or PDF.',
@@ -89,12 +108,13 @@ class PlatformDocumentSource implements DocumentSource {
         'File looks empty or corrupt (under 1 KB).',
       );
     }
+    final checksum = await ImageProcessor.checksum(bytes);
     return DocumentBytes(
       bytes: bytes,
       originalName: name,
       mimeType: mime,
       size: bytes.length,
-      checksum: _quickChecksum(bytes),
+      checksum: checksum,
     );
   }
 
@@ -104,18 +124,6 @@ class PlatformDocumentSource implements DocumentSource {
     if (lower.endsWith('.png')) return 'image/png';
     if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
     return 'application/octet-stream';
-  }
-
-  /// Tiny non-cryptographic checksum so the API metadata field is non-empty
-  /// without pulling in `package:crypto`. The mock backend does not verify
-  /// it; production would substitute SHA-256 here.
-  static String _quickChecksum(Uint8List bytes) {
-    var h = 0xcbf29ce484222325; // FNV-1a 64-bit offset basis
-    for (final b in bytes) {
-      h = (h ^ b) & 0xFFFFFFFFFFFFFFFF;
-      h = (h * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF;
-    }
-    return h.toRadixString(16).padLeft(16, '0');
   }
 }
 

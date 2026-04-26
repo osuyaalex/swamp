@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:screen_protector/screen_protector.dart';
 
 import 'package:untitled2/core/connectivity_state.dart';
 import 'package:untitled2/core/screen_capture_guard.dart';
@@ -60,8 +61,11 @@ class _HomeShellState extends State<HomeShell> {
     _connSub = _connectivity.stream.listen((next) {
       if (mounted) setState(() => _connState = next);
     });
-    // Documents tab is the default-after-tasks; if the user lands on
-    // index 0 (Tasks), the guard stays off until they switch.
+    // TEMPORARY (for video recording): force-clear FLAG_SECURE that
+    // may persist on the Android Activity from a previous run, since
+    // hot restart doesn't reinitialise the activity. Revert this and
+    // re-enable `ScreenCaptureGuard.protect()` before shipping.
+    ScreenProtector.protectDataLeakageOff();
     _syncScreenGuardFor(_index);
   }
 

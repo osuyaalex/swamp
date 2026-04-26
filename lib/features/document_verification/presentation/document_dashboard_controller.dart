@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'package:untitled2/core/biometrics.dart';
+import 'package:untitled2/core/image_processor.dart';
 import 'package:untitled2/features/document_verification/data/document_source.dart';
+import 'package:untitled2/features/document_verification/data/ocr_service.dart';
 import 'package:untitled2/features/document_verification/domain/entities/document.dart';
 import 'package:untitled2/features/document_verification/domain/repositories/document_repository.dart';
 
@@ -12,15 +14,18 @@ class DocumentDashboardController extends ChangeNotifier {
     required DocumentRepository repository,
     required DocumentSource source,
     required Biometrics biometrics,
+    required OcrService ocrService,
   })  : _repo = repository,
         _source = source,
-        _biometrics = biometrics {
+        _biometrics = biometrics,
+        _ocrService = ocrService {
     _bootstrap();
   }
 
   final DocumentRepository _repo;
   final DocumentSource _source;
   final Biometrics _biometrics;
+  final OcrService _ocrService;
 
   /// Repository handle exposed for screens that need to append audit
   /// entries from outside the controller's own operations (e.g. the
@@ -54,8 +59,27 @@ class DocumentDashboardController extends ChangeNotifier {
       _connection = next;
       notifyListeners();
     });
+    // Recover any camera-intent result lost to an Android process kill.
+    // No-op on iOS / web.
+    unawaited(_recoverLostCameraData());
     _loading = false;
     notifyListeners();
+  }
+
+  Future<void> _recoverLostCameraData() async {
+    try {
+      final bytes = await _source.retrieveLostData();
+      if (bytes == null) return;
+      // We don't know which type the user had picked, since the
+      // pickAndUpload future died with the process. Default to passport
+      // — the user can re-upload as a different type if they meant
+      // something else. Worst case: a redundant upload they can delete.
+      final doc = await _repo.upload(type: DocumentType.passport, bytes: bytes);
+      _enrichWithThumbnail(doc.id, bytes);
+      _enrichWithOcr(doc.id, bytes);
+    } catch (_) {
+      // Lost-data recovery is best-effort — never raise to the user.
+    }
   }
 
   // ----- UI-facing operations ------------------------------------------------
@@ -63,6 +87,12 @@ class DocumentDashboardController extends ChangeNotifier {
   /// Pick from the given [kind] and immediately upload as [type]. Errors
   /// from the picker (size/mime/cancelled) are surfaced via [lastError]
   /// without throwing; the dashboard reads it and shows a SnackBar.
+  ///
+  /// After upload returns, kicks off OCR + thumbnail generation in the
+  /// background. Both run in isolates so the dashboard stays responsive
+  /// even on a low-end device. Results are merged into the document
+  /// asynchronously — the UI reactively picks them up via the doc list
+  /// stream.
   Future<void> pickAndUpload({
     required DocumentType type,
     required DocumentSourceKind kind,
@@ -72,11 +102,76 @@ class DocumentDashboardController extends ChangeNotifier {
     try {
       final bytes = await _source.pick(kind);
       if (bytes == null) return; // user cancelled — silent
-      await _repo.upload(type: type, bytes: bytes);
+      final doc = await _repo.upload(type: type, bytes: bytes);
+      // Fire-and-forget — these enrich the doc but shouldn't block the
+      // upload return. They each run in their own isolate.
+      _enrichWithThumbnail(doc.id, bytes);
+      _enrichWithOcr(doc.id, bytes);
     } catch (e) {
       _lastError = e.toString();
       notifyListeners();
     }
+  }
+
+  /// Capture pre-built bytes (e.g. from the custom camera) and upload
+  /// them directly, bypassing the normal picker. Same enrichment as
+  /// [pickAndUpload].
+  Future<Document?> uploadBytes({
+    required DocumentType type,
+    required DocumentBytes bytes,
+  }) async {
+    _lastError = null;
+    notifyListeners();
+    try {
+      final doc = await _repo.upload(type: type, bytes: bytes);
+      _enrichWithThumbnail(doc.id, bytes);
+      _enrichWithOcr(doc.id, bytes);
+      return doc;
+    } catch (e) {
+      _lastError = e.toString();
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<void> _enrichWithThumbnail(
+    String documentId,
+    DocumentBytes bytes,
+  ) async {
+    final thumb = await ImageProcessor.thumbnail(bytes.bytes);
+    if (thumb == null) return;
+    await _repo.updateEnrichment(
+      documentId: documentId,
+      thumbnailBytes: thumb,
+    );
+  }
+
+  Future<void> _enrichWithOcr(
+    String documentId,
+    DocumentBytes bytes,
+  ) async {
+    final result = await _ocrService.process(
+      bytes: bytes.bytes,
+      mimeType: bytes.mimeType,
+    );
+    if (result == null) return;
+    await _repo.updateEnrichment(
+      documentId: documentId,
+      ocrResult: result,
+    );
+    // Surface key OCR fields in the audit trail.
+    final fieldsLine = result.fields.entries
+        .take(3)
+        .map((e) => '${e.key}: ${e.value}')
+        .join(', ');
+    await _repo.appendAudit(
+      documentId: documentId,
+      kind: AuditKind.statusChanged,
+      message: fieldsLine.isEmpty
+          ? 'OCR ran (${result.blocks.length} blocks recognised)'
+          : 'OCR extracted — $fieldsLine',
+      actor: 'system',
+    );
   }
 
   Future<void> retry(String documentId) async {
