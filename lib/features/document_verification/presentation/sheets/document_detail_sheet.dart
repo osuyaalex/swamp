@@ -48,95 +48,94 @@ class DocumentDetailSheet extends StatelessWidget {
 
     return DraggableScrollableSheet(
       expand: false,
-      initialChildSize: 0.78,
-      minChildSize: 0.4,
+      initialChildSize: 0.9,
+      minChildSize: 0.5,
       maxChildSize: 0.95,
       builder: (context, scroll) {
-        return Column(
-          children: [
-            const SizedBox(height: 12),
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.outlineVariant,
-                  borderRadius: BorderRadius.circular(999),
+        return Container(
+          decoration: BoxDecoration(
+            color: theme.scaffoldBackgroundColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+          ),
+          child: Column(
+            children: [
+              const SizedBox(height: 12),
+              Center(
+                child: Container(
+                  width: 48,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: ListView(
-                controller: scroll,
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 44,
-                        height: 44,
-                        decoration: BoxDecoration(
-                          color: doc.status.color.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(12),
+              const SizedBox(height: 24),
+              Expanded(
+                child: ListView(
+                  controller: scroll,
+                  padding: const EdgeInsets.fromLTRB(24, 8, 24, 40),
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 56,
+                          height: 56,
+                          decoration: BoxDecoration(
+                            color: doc.status.color.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: doc.status.color.withValues(alpha: 0.2)),
+                          ),
+                          child: Icon(doc.type.icon, color: doc.status.color, size: 28),
                         ),
-                        child: Icon(doc.type.icon, color: doc.status.color),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              doc.type.label,
-                              style: theme.textTheme.titleLarge?.copyWith(
-                                fontWeight: FontWeight.w800,
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                doc.type.label,
+                                style: theme.textTheme.headlineSmall?.copyWith(
+                                  fontWeight: FontWeight.w900,
+                                ),
                               ),
-                            ),
-                            Text(
-                              doc.originalName,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
+                              Text(
+                                doc.originalName,
+                                style: theme.textTheme.bodyMedium,
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-                      DocumentStatusChip(status: doc.status),
-                    ],
-                  ),
-                  if (doc.bytes != null || doc.thumbnailBytes != null) ...[
-                    const SizedBox(height: 18),
-                    _DocumentPreviewSection(doc: doc),
-                  ],
-                  const SizedBox(height: 18),
-                  if (!doc.status.isTerminal) ...[
-                    LinearProgressIndicator(
-                      value: doc.status == DocumentStatus.uploading
-                          ? null
-                          : doc.progress,
-                      minHeight: 6,
-                      backgroundColor:
-                          theme.colorScheme.surfaceContainerHighest,
-                      valueColor:
-                          AlwaysStoppedAnimation(doc.status.color),
+                      ],
                     ),
-                    const SizedBox(height: 8),
-                    if (doc.stage != null)
-                      Text(
-                        '${doc.stage!} — ${(doc.progress * 100).round()}%',
-                        style: theme.textTheme.bodySmall,
-                      ),
-                    if (doc.confidence != null) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        'Confidence ${(doc.confidence! * 100).round()}%',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
+                    const SizedBox(height: 24),
+                    DocumentStatusChip(status: doc.status),
+                    if (doc.bytes != null || doc.thumbnailBytes != null) ...[
+                      const SizedBox(height: 32),
+                      _DocumentPreviewSection(doc: doc),
+                    ],
+                    const SizedBox(height: 32),
+                    if (!doc.status.isTerminal) ...[
+                      Text('Verification Progress', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 12),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(99),
+                        child: LinearProgressIndicator(
+                          value: doc.status == DocumentStatus.uploading
+                              ? null
+                              : doc.progress,
+                          minHeight: 10,
+                          backgroundColor: theme.colorScheme.surface,
+                          valueColor: AlwaysStoppedAnimation(doc.status.color),
                         ),
                       ),
+                      const SizedBox(height: 12),
+                      if (doc.stage != null)
+                        Text(
+                          '${doc.stage!} • ${(doc.progress * 100).round()}%',
+                          style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold, color: theme.colorScheme.primary),
+                        ),
                     ],
-                  ],
                   if (doc.status == DocumentStatus.rejected &&
                       doc.rejectionReason != null) ...[
                     _Notice(
@@ -220,6 +219,7 @@ class DocumentDetailSheet extends StatelessWidget {
               ),
             ),
           ],
+        )
         );
       },
     );

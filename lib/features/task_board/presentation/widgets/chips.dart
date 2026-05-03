@@ -13,30 +13,36 @@ class PriorityChip extends StatelessWidget {
     final color = priority.color;
     return Container(
       padding: EdgeInsets.symmetric(
-        horizontal: dense ? 6 : 9,
-        vertical: dense ? 2 : 4,
+        horizontal: dense ? 8 : 12,
+        vertical: dense ? 3 : 6,
       ),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.45), width: 1),
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.2), width: 1),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 6,
-            height: 6,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            width: 5,
+            height: 5,
+            decoration: BoxDecoration(
+              color: color, 
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(color: color.withValues(alpha: 0.5), blurRadius: 4, spreadRadius: 1),
+              ],
+            ),
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: 8),
           Text(
-            priority.label,
+            priority.label.toUpperCase(),
             style: TextStyle(
               color: color,
-              fontWeight: FontWeight.w600,
-              fontSize: dense ? 10.5 : 11.5,
-              letterSpacing: 0.2,
+              fontWeight: FontWeight.w900,
+              fontSize: dense ? 10 : 11,
+              letterSpacing: 1.1,
             ),
           ),
         ],

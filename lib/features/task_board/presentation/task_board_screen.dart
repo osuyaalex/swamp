@@ -59,30 +59,56 @@ class _BoardScaffold extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text(
-          'SWAMP_  •  Tasks',
-          style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 0.4),
+        title: Text(
+          'SWAMP_',
+          style: theme.appBarTheme.titleTextStyle?.copyWith(
+            color: theme.colorScheme.primary,
+            letterSpacing: 2,
+          ),
         ),
-        backgroundColor: theme.scaffoldBackgroundColor,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
         actions: [
-          IconButton(
-            tooltip: 'New task',
-            icon: const Icon(Icons.add_circle_outline),
-            onPressed: () => TaskEditorSheet.show(context),
+          Container(
+            margin: const EdgeInsets.only(right: 8),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primary.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: IconButton(
+              tooltip: 'New task',
+              icon: const Icon(Icons.add_rounded),
+              onPressed: () => TaskEditorSheet.show(context),
+            ),
           ),
         ],
       ),
-      body: SafeArea(
-        top: false,
-        child: Stack(
-          children: const [
-            Positioned.fill(child: _BoardBody()),
-            Positioned.fill(child: DragOverlayLayer()),
-          ],
-        ),
+      body: Stack(
+        children: [
+          Positioned(
+            top: -100,
+            left: -100,
+            child: Container(
+              width: 300,
+              height: 300,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: theme.colorScheme.primary.withValues(alpha: 0.05),
+              ),
+            ),
+          ),
+          SafeArea(
+            child: Stack(
+              children: const [
+                Positioned.fill(child: _BoardBody()),
+                Positioned.fill(child: DragOverlayLayer()),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -115,53 +141,81 @@ class _BoardBodyState extends State<_BoardBody> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final board = context.watch<TaskBoardController>();
     if (board.loading) {
       return const Center(child: CircularProgressIndicator());
     }
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // 3 columns side-by-side on tablets/desktop; horizontally scrollable
-        // on phones.
-        final isWide = constraints.maxWidth >= 900;
-        final columnWidth = isWide
-            ? (constraints.maxWidth - 16 * 4) / 3
-            : (constraints.maxWidth * 0.82).clamp(280.0, 380.0);
-
-        return Scrollbar(
-          controller: _hScroll,
-          child: SingleChildScrollView(
-            controller: _hScroll,
-            scrollDirection: Axis.horizontal,
-            physics: isWide
-                ? const NeverScrollableScrollPhysics()
-                : const BouncingScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: SizedBox(
-              width: isWide ? constraints.maxWidth - 32 : null,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (int i = 0; i < TaskStatus.values.length; i++) ...[
-                    SizedBox(
-                      width: columnWidth,
-                      child: TaskColumn(
-                        status: TaskStatus.values[i],
-                        onTapTask: (t) =>
-                            TaskDetailSheet.show(context, t.id),
-                        onTapAdd: () => TaskEditorSheet.show(context),
-                      ),
-                    ),
-                    if (i != TaskStatus.values.length - 1)
-                      const SizedBox(width: 12),
-                  ],
-                ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Task Board',
+                style: theme.textTheme.displaySmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 28,
+                ),
               ),
-            ),
+              const SizedBox(height: 4),
+              Text(
+                'Organize and track your progress',
+                style: theme.textTheme.bodyMedium,
+              ),
+            ],
           ),
-        );
-      },
+        ),
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              // 3 columns side-by-side on tablets/desktop; horizontally scrollable
+              // on phones.
+              final isWide = constraints.maxWidth >= 900;
+              final columnWidth = isWide
+                  ? (constraints.maxWidth - 16 * 4) / 3
+                  : (constraints.maxWidth * 0.82).clamp(280.0, 380.0);
+
+              return Scrollbar(
+                controller: _hScroll,
+                child: SingleChildScrollView(
+                  controller: _hScroll,
+                  scrollDirection: Axis.horizontal,
+                  physics: isWide
+                      ? const NeverScrollableScrollPhysics()
+                      : const BouncingScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                  child: SizedBox(
+                    width: isWide ? constraints.maxWidth - 40 : null,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (int i = 0; i < TaskStatus.values.length; i++) ...[
+                          SizedBox(
+                            width: columnWidth,
+                            child: TaskColumn(
+                              status: TaskStatus.values[i],
+                              onTapTask: (t) =>
+                                  TaskDetailSheet.show(context, t.id),
+                              onTapAdd: () => TaskEditorSheet.show(context),
+                            ),
+                          ),
+                          if (i != TaskStatus.values.length - 1)
+                            const SizedBox(width: 16),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }

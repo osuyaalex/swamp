@@ -20,7 +20,7 @@ class MyApp extends StatelessWidget {
         return MaterialApp(
           debugShowCheckedModeBanner: false,
           title: 'SWAMP_',
-          theme: AppTheme.light(),
+          theme: AppTheme.dark(),
           home: const Home(),
         );
       },

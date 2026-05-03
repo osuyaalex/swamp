@@ -24,25 +24,32 @@ class TaskCardVisual extends StatelessWidget {
     final overdue = task.isOverdue;
     return Container(
       decoration: BoxDecoration(
-        color: theme.cardTheme.color ?? Colors.white,
-        borderRadius: BorderRadius.circular(14),
+        color: ghost ? theme.colorScheme.primary.withValues(alpha: 0.1) : theme.cardTheme.color,
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: ghost
-              ? task.priority.color.withValues(alpha: 0.6)
-              : Colors.black.withValues(alpha: 0.05),
+              ? theme.colorScheme.primary
+              : Colors.white.withValues(alpha: 0.08),
+          width: ghost ? 2 : 1,
         ),
         boxShadow: ghost
-            ? null
+            ? [
+                BoxShadow(
+                  color: theme.colorScheme.primary.withValues(alpha: 0.3),
+                  blurRadius: 20,
+                  spreadRadius: 2,
+                )
+              ]
             : [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.04),
-                  blurRadius: 6,
-                  offset: const Offset(0, 2),
+                  color: Colors.black.withValues(alpha: 0.15),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
                 ),
               ],
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,

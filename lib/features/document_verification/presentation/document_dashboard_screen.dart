@@ -79,35 +79,62 @@ class _DashboardScaffold extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        backgroundColor: theme.scaffoldBackgroundColor,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
-        title: const Text(
-          'SWAMP_  •  Documents',
-          style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 0.4),
+        title: Text(
+          'SWAMP_',
+          style: theme.appBarTheme.titleTextStyle?.copyWith(
+            color: theme.colorScheme.primary,
+            letterSpacing: 2,
+          ),
         ),
         actions: [
-          IconButton(
-            tooltip: 'Upload',
-            icon: const Icon(Icons.cloud_upload_outlined),
-            onPressed: () => UploadSheet.show(context),
+          Container(
+            margin: const EdgeInsets.only(right: 8),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primary.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: IconButton(
+              tooltip: 'Upload',
+              icon: const Icon(Icons.cloud_upload_outlined),
+              onPressed: () => UploadSheet.show(context),
+            ),
           ),
         ],
       ),
-      body: SafeArea(
-        top: false,
-        child: Column(
-          children: const [
-            ConnectionBanner(),
-            Expanded(child: _DashboardBody()),
-          ],
-        ),
+      body: Stack(
+        children: [
+          // Background Gradient
+          Positioned(
+            top: -100,
+            right: -100,
+            child: Container(
+              width: 300,
+              height: 300,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: theme.colorScheme.primary.withValues(alpha: 0.05),
+              ),
+            ),
+          ),
+          SafeArea(
+            child: Column(
+              children: const [
+                ConnectionBanner(),
+                Expanded(child: _DashboardBody()),
+              ],
+            ),
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => UploadSheet.show(context),
-        icon: const Icon(Icons.add),
-        label: const Text('New document'),
+        icon: const Icon(Icons.add_rounded),
+        label: const Text('New Document', style: TextStyle(fontWeight: FontWeight.bold)),
       ),
     );
   }
@@ -148,6 +175,7 @@ class _DashboardBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final controller = context.watch<DocumentDashboardController>();
     if (controller.loading) {
       return const Center(child: CircularProgressIndicator());
@@ -157,13 +185,41 @@ class _DashboardBody extends StatelessWidget {
       return const _EmptyState();
     }
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 120),
       children: [
+        Text(
+          'Verification Center',
+          style: theme.textTheme.displaySmall?.copyWith(
+            fontWeight: FontWeight.w900,
+            fontSize: 28,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Manage and verify your identity documents',
+          style: theme.textTheme.bodyMedium,
+        ),
+        const SizedBox(height: 24),
         _SummaryHeader(summary: controller.summary),
-        const SizedBox(height: 14),
+        const SizedBox(height: 32),
+        Row(
+          children: [
+            Text(
+              'RECENT DOCUMENTS',
+              style: theme.textTheme.labelSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.5,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+            const Spacer(),
+            Icon(Icons.filter_list_rounded, size: 16, color: theme.colorScheme.primary),
+          ],
+        ),
+        const SizedBox(height: 16),
         for (final d in docs)
           Padding(
-            padding: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.only(bottom: 12),
             child: DocumentCard(
               key: ValueKey(d.id),
               document: d,
@@ -184,30 +240,40 @@ class _SummaryHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    Widget cell(String label, int value, Color color) {
+    Widget cell(String label, int value, Color color, IconData icon) {
       return Expanded(
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
           decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.07),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: color.withValues(alpha: 0.25)),
+            color: color.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: color.withValues(alpha: 0.2), width: 1.5),
           ),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, size: 14, color: color),
+              ),
+              const SizedBox(height: 12),
               Text(
                 '$value',
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w800,
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
                   color: color,
                 ),
               ),
               Text(
                 label,
                 style: theme.textTheme.labelSmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: color,
-                  letterSpacing: 0.3,
+                  fontWeight: FontWeight.w700,
+                  color: color.withValues(alpha: 0.8),
+                  letterSpacing: 0.5,
                 ),
               ),
             ],
@@ -218,11 +284,11 @@ class _SummaryHeader extends StatelessWidget {
 
     return Row(
       children: [
-        cell('VERIFIED', summary.verified, DocumentStatus.verified.color),
-        const SizedBox(width: 8),
-        cell('PENDING', summary.pending, DocumentStatus.processing.color),
-        const SizedBox(width: 8),
-        cell('REJECTED', summary.rejected, DocumentStatus.rejected.color),
+        cell('VERIFIED', summary.verified, theme.colorScheme.primary, Icons.check_circle_rounded),
+        const SizedBox(width: 10),
+        cell('PENDING', summary.pending, Colors.orangeAccent, Icons.pending_rounded),
+        const SizedBox(width: 10),
+        cell('REJECTED', summary.rejected, Colors.redAccent, Icons.error_rounded),
       ],
     );
   }

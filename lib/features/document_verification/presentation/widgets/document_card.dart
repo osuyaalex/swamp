@@ -28,18 +28,20 @@ class DocumentCard extends StatelessWidget {
 
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(20),
       child: Container(
-        padding: const EdgeInsets.fromLTRB(14, 12, 12, 14),
+        padding: const EdgeInsets.fromLTRB(16, 16, 12, 16),
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+          color: theme.cardTheme.color,
+          borderRadius: BorderRadius.circular(20),
+          border: theme.cardTheme.shape is RoundedRectangleBorder 
+            ? Border.fromBorderSide((theme.cardTheme.shape as RoundedRectangleBorder).side)
+            : Border.all(color: Colors.white.withValues(alpha: 0.1)),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.03),
-              blurRadius: 6,
-              offset: const Offset(0, 2),
+              color: Colors.black.withValues(alpha: 0.2),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
             ),
           ],
         ),

@@ -117,43 +117,57 @@ class _TaskEditorSheetState extends State<TaskEditorSheet> {
     final theme = Theme.of(context);
     return SafeArea(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        padding: const EdgeInsets.fromLTRB(24, 12, 24, 40),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Center(
               child: Container(
-                width: 36,
-                height: 4,
+                width: 48,
+                height: 5,
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.outlineVariant,
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(999),
                 ),
               ),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 32),
             Text(
-              widget.existing == null ? 'New task' : 'Edit task',
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w700,
+              widget.existing == null ? 'New Task' : 'Edit Task',
+              style: theme.textTheme.displaySmall?.copyWith(
+                fontWeight: FontWeight.w900,
+                fontSize: 24,
               ),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 24),
             TextField(
               controller: _title,
               autofocus: widget.existing == null,
               textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(hintText: 'Task title'),
-              style: theme.textTheme.titleMedium,
+              decoration: const InputDecoration(
+                hintText: 'What needs to be done?',
+                labelText: 'Title',
+              ),
+              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
             ),
-            const SizedBox(height: 14),
-            RichTextEditor(controller: _desc),
-            const SizedBox(height: 14),
-            Text('Priority', style: theme.textTheme.labelLarge),
+            const SizedBox(height: 20),
+            Text('Description', style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.primary)),
             const SizedBox(height: 8),
+            Container(
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+              ),
+              padding: const EdgeInsets.all(4),
+              child: RichTextEditor(controller: _desc),
+            ),
+            const SizedBox(height: 24),
+            Text('Priority', style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.primary)),
+            const SizedBox(height: 12),
             Wrap(
-              spacing: 8,
+              spacing: 10,
               children: [
                 for (final p in TaskPriority.values)
                   _PriorityToggle(
@@ -163,60 +177,73 @@ class _TaskEditorSheetState extends State<TaskEditorSheet> {
                   ),
               ],
             ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Text('Due date', style: theme.textTheme.labelLarge),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: InkWell(
-                    onTap: _pickDue,
-                    borderRadius: BorderRadius.circular(10),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: theme.inputDecorationTheme.fillColor,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.event_outlined,
-                              size: 16,
-                              color: theme.colorScheme.onSurfaceVariant),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              _due == null ? 'No due date' : _formatDue(_due!),
-                              style: theme.textTheme.bodyMedium,
-                            ),
-                          ),
-                          if (_due != null)
-                            IconButton(
-                              tooltip: 'Clear',
-                              icon: const Icon(Icons.close, size: 16),
-                              visualDensity: VisualDensity.compact,
-                              onPressed: () => setState(() => _due = null),
-                            ),
-                        ],
+            const SizedBox(height: 24),
+            Text('Schedule', style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.primary)),
+            const SizedBox(height: 12),
+            InkWell(
+              onTap: _pickDue,
+              borderRadius: BorderRadius.circular(16),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.calendar_today_rounded,
+                        size: 20,
+                        color: theme.colorScheme.primary),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        _due == null ? 'Set due date' : _formatDue(_due!),
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          fontWeight: _due != null ? FontWeight.bold : FontWeight.normal,
+                          color: _due != null ? theme.colorScheme.onSurface : theme.colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ),
+                    if (_due != null)
+                      IconButton(
+                        tooltip: 'Clear',
+                        icon: const Icon(Icons.close_rounded, size: 20),
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => setState(() => _due = null),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 32),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    ),
+                    child: const Text('Cancel'),
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 18),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
-                ),
-                const SizedBox(width: 8),
-                FilledButton(
-                  onPressed: _save,
-                  child: Text(widget.existing == null ? 'Create' : 'Save'),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: _save,
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      backgroundColor: theme.colorScheme.primary,
+                      foregroundColor: theme.colorScheme.onPrimary,
+                    ),
+                    child: Text(
+                      widget.existing == null ? 'Create Task' : 'Save Changes',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
                 ),
               ],
             ),
